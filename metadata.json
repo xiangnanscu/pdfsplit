@@ -1,0 +1,5 @@
+{
+  "name": "Math Exam PDF Question Splitter",
+  "description": "An intelligent tool that uses AI to detect and extract individual math questions from PDF exam papers, automatically cropping them into separate high-quality images.",
+  "requestFramePermissions": []
+}

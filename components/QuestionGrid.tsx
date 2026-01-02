@@ -1,0 +1,371 @@
+
+import React, { useState, useEffect, useCallback } from 'react';
+import JSZip from 'jszip';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import { QuestionImage } from '../types';
+
+interface Props {
+  questions: QuestionImage[];
+  sourceFileName: string;
+}
+
+export const QuestionGrid: React.FC<Props> = ({ questions, sourceFileName }) => {
+  const [isZipping, setIsZipping] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<QuestionImage | null>(null);
+  const [showAnalysis, setShowAnalysis] = useState(false); 
+  const [showOriginal, setShowOriginal] = useState(false); 
+
+  // Handle keyboard navigation
+  const handleNext = useCallback(() => {
+    if (!selectedImage) return;
+    const currentIndex = questions.indexOf(selectedImage);
+    if (currentIndex < questions.length - 1) {
+      setSelectedImage(questions[currentIndex + 1]);
+      setShowAnalysis(false);
+      setShowOriginal(false);
+    }
+  }, [questions, selectedImage]);
+
+  const handlePrev = useCallback(() => {
+    if (!selectedImage) return;
+    const currentIndex = questions.indexOf(selectedImage);
+    if (currentIndex > 0) {
+      setSelectedImage(questions[currentIndex - 1]);
+      setShowAnalysis(false);
+      setShowOriginal(false);
+    }
+  }, [questions, selectedImage]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedImage) return;
+      if (e.key === 'ArrowRight') handleNext();
+      if (e.key === 'ArrowLeft') handlePrev();
+      if (e.key === 'Escape') setSelectedImage(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedImage, handleNext, handlePrev]);
+
+  const downloadAllAsZip = async () => {
+    if (questions.length === 0) return;
+    setIsZipping(true);
+    
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder(sourceFileName || "math_questions");
+
+      questions.forEach((q, index) => {
+        // Extract base64 data (part after comma)
+        const base64Data = q.dataUrl.split(',')[1];
+        const baseFilename = `Page${q.pageNumber}_Q${q.id || index + 1}`;
+        folder?.file(`${baseFilename}.jpg`, base64Data, { base64: true });
+        
+        // If markdown analysis exists, save it as a text file
+        if (q.markdown) {
+          const infoText = `
+---
+Question ID: ${q.id}
+Type: ${q.type || 'N/A'}
+Difficulty: ${q.difficulty || 'N/A'}
+Tags: ${(q.tags || []).join(', ')}
+---
+
+## Question
+${q.markdown}
+
+## Analysis
+${q.analysis || 'No analysis available'}
+          `;
+          folder?.file(`${baseFilename}_info.md`, infoText.trim());
+        }
+      });
+
+      const content = await zip.generateAsync({ 
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 }
+      });
+      
+      const url = window.URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sourceFileName}_split.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error creating ZIP:", err);
+      alert("An error occurred while creating the ZIP file. Please try downloading images individually.");
+    } finally {
+      setIsZipping(false);
+    }
+  };
+
+  if (questions.length === 0) return null;
+
+  const currentIndex = selectedImage ? questions.indexOf(selectedImage) : -1;
+  const hasNext = currentIndex < questions.length - 1;
+  const hasPrev = currentIndex > 0;
+
+  return (
+    <>
+      <div className="mt-8 w-full animate-[fade-in_0.6s_ease-out]">
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6 border-b border-slate-200 pb-8">
+          <div>
+            <h2 className="text-3xl font-extrabold text-slate-900 mb-2">Final Results</h2>
+            <p className="text-slate-500 font-medium flex items-center gap-2">
+              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+              {questions.length} questions extracted from <span className="font-bold text-slate-700">{sourceFileName}</span>
+            </p>
+          </div>
+          <button 
+            onClick={downloadAllAsZip}
+            disabled={isZipping}
+            className={`group px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 shadow-xl shadow-blue-100 min-w-[220px] ${
+              isZipping 
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                : 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95'
+            }`}
+          >
+            {isZipping ? (
+              <>
+                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Zipping...
+              </>
+            ) : (
+              <>
+                <svg className="w-6 h-6 group-hover:bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download ZIP
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Updated grid for wider layouts */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8">
+          {questions.map((q, idx) => (
+            <div 
+              key={`${q.pageNumber}-${idx}`} 
+              className="group bg-white border border-slate-200 rounded-3xl overflow-hidden hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 flex flex-col"
+            >
+              <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <span className="text-xs font-black uppercase tracking-widest text-slate-400">P{q.pageNumber} • Q{q.id || idx + 1}</span>
+                <div className="flex gap-2">
+                  {q.originalDataUrl && (
+                    <span className="text-[10px] px-2 py-0.5 bg-orange-100 text-orange-600 rounded-full font-bold border border-orange-200" title="Pixels were removed by edge peeling">
+                      Cleaned
+                    </span>
+                  )}
+                  {q.tags && q.tags.length > 0 && (
+                    <div className="flex gap-1">
+                      {q.tags.slice(0,2).map(tag => (
+                        <span key={tag} className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-medium truncate max-w-[80px]">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div 
+                className="p-8 flex items-center justify-center flex-grow bg-white min-h-[240px] cursor-zoom-in relative"
+                onClick={() => setSelectedImage(q)}
+              >
+                <img 
+                  src={q.dataUrl} 
+                  alt={`Question ${q.id}`} 
+                  className="max-w-full h-auto rounded-lg select-none shadow-sm transition-transform group-hover:scale-[1.02]"
+                />
+                {q.analysis && (
+                  <div className="absolute bottom-2 right-2 bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md font-bold shadow-sm">
+                    AI Analysis Available
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Lightbox / Modal */}
+      {selectedImage && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm transition-opacity animate-[fade-in_0.2s_ease-out]"
+          onClick={() => setSelectedImage(null)}
+        >
+          {/* Navigation Buttons */}
+          {hasPrev && (
+            <button
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-4 text-white/50 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePrev();
+              }}
+            >
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+
+          {hasNext && (
+            <button
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-4 text-white/50 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleNext();
+              }}
+            >
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
+
+          <div className="relative max-w-7xl w-full h-[95vh] flex flex-col items-center justify-center p-4 md:px-12 md:py-8" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full flex justify-between items-center text-white mb-4">
+               <div className="flex items-center gap-4">
+                 <h2 className="text-2xl font-bold">Question {selectedImage.id}</h2>
+                 {selectedImage.type && <span className="px-3 py-1 bg-white/20 rounded-full text-sm">{selectedImage.type}</span>}
+                 {selectedImage.difficulty && <span className="px-3 py-1 bg-white/20 rounded-full text-sm">{selectedImage.difficulty}</span>}
+               </div>
+               <div className="flex gap-4">
+                  {selectedImage.analysis && (
+                    <button 
+                      onClick={() => setShowAnalysis(!showAnalysis)}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                      {showAnalysis ? 'Show Original Image' : 'Show AI Analysis'}
+                    </button>
+                  )}
+                  <button 
+                    className="text-white/50 hover:text-white p-2 transition-colors"
+                    onClick={() => setSelectedImage(null)}
+                  >
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+               </div>
+            </div>
+            
+            <div className="flex-1 w-full bg-white rounded-xl overflow-hidden shadow-2xl relative flex flex-col">
+              {showAnalysis && selectedImage.markdown ? (
+                <div className="w-full h-full overflow-y-auto p-8 bg-slate-50">
+                  <div className="max-w-4xl mx-auto space-y-8">
+                    {/* Tags Section */}
+                    {selectedImage.tags && (
+                      <div className="flex flex-wrap gap-2">
+                        {selectedImage.tags.map(tag => (
+                          <span key={tag} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Question Markdown */}
+                    <div className="prose prose-lg max-w-none prose-slate">
+                      <h3 className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-2">Question Text</h3>
+                      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <ReactMarkdown 
+                          remarkPlugins={[remarkMath]} 
+                          rehypePlugins={[rehypeKatex]}
+                        >
+                          {selectedImage.markdown}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+
+                    {/* Analysis Section */}
+                    {selectedImage.analysis && (
+                      <div className="prose prose-lg max-w-none prose-slate">
+                        <h3 className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-2">AI Analysis & Key Steps</h3>
+                        <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100 shadow-sm text-slate-700">
+                          <ReactMarkdown 
+                            remarkPlugins={[remarkMath]} 
+                            rehypePlugins={[rehypeKatex]}
+                          >
+                            {selectedImage.analysis}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    )}
+
+                     {/* Graphic Boxes Info */}
+                     {selectedImage.graphic_boxes_2d && selectedImage.graphic_boxes_2d.length > 0 && (
+                      <div>
+                        <h3 className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-2">Detected Figures</h3>
+                         <div className="grid grid-cols-2 gap-4">
+                            {selectedImage.graphic_boxes_2d.map((box, i) => (
+                              <div key={i} className="bg-gray-100 p-3 rounded text-xs font-mono text-gray-600">
+                                Figure {i+1} Area: [y:{Math.round(box[0])}, x:{Math.round(box[1])}] to [y:{Math.round(box[2])}, x:{Math.round(box[3])}]
+                              </div>
+                            ))}
+                         </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="relative w-full h-full bg-slate-100 flex items-center justify-center p-8">
+                  {/* Compare Button Overlay */}
+                  {selectedImage.originalDataUrl && (
+                    <div className="absolute top-4 left-4 z-20">
+                      <button 
+                        onMouseDown={() => setShowOriginal(true)}
+                        onMouseUp={() => setShowOriginal(false)}
+                        onMouseLeave={() => setShowOriginal(false)}
+                        onTouchStart={() => setShowOriginal(true)}
+                        onTouchEnd={() => setShowOriginal(false)}
+                        className={`
+                          px-4 py-2 rounded-full font-bold shadow-lg transition-all border-2
+                          ${showOriginal 
+                            ? 'bg-orange-500 text-white border-orange-600 scale-105' 
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                          }
+                        `}
+                      >
+                        {showOriginal ? 'Showing Original Crop' : 'Hold to See Original'}
+                      </button>
+                    </div>
+                  )}
+
+                  <img 
+                    src={showOriginal && selectedImage.originalDataUrl ? selectedImage.originalDataUrl : selectedImage.dataUrl} 
+                    alt={`Full size Question ${selectedImage.id}`} 
+                    className={`max-h-full max-w-full object-contain shadow-lg transition-all duration-150 ${showOriginal ? 'ring-4 ring-orange-500' : ''}`}
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="mt-6 flex items-center justify-between w-full max-w-4xl">
+              <span className="text-white/60 text-sm">Use arrow keys to navigate</span>
+              <a 
+                 href={selectedImage.dataUrl} 
+                 download={`P${selectedImage.pageNumber}_Q${selectedImage.id}.jpg`}
+                 className="bg-white text-black px-6 py-2 rounded-full font-bold hover:bg-slate-200 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download Image
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
