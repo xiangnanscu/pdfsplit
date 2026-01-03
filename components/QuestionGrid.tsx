@@ -1,9 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import JSZip from 'jszip';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 import { QuestionImage } from '../types';
 
 interface Props {
@@ -14,7 +11,6 @@ interface Props {
 export const QuestionGrid: React.FC<Props> = ({ questions, sourceFileName }) => {
   const [isZipping, setIsZipping] = useState(false);
   const [selectedImage, setSelectedImage] = useState<QuestionImage | null>(null);
-  const [showAnalysis, setShowAnalysis] = useState(false); 
   const [showOriginal, setShowOriginal] = useState(false); 
 
   // Handle keyboard navigation
@@ -23,7 +19,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, sourceFileName }) => 
     const currentIndex = questions.indexOf(selectedImage);
     if (currentIndex < questions.length - 1) {
       setSelectedImage(questions[currentIndex + 1]);
-      setShowAnalysis(false);
       setShowOriginal(false);
     }
   }, [questions, selectedImage]);
@@ -33,7 +28,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, sourceFileName }) => 
     const currentIndex = questions.indexOf(selectedImage);
     if (currentIndex > 0) {
       setSelectedImage(questions[currentIndex - 1]);
-      setShowAnalysis(false);
       setShowOriginal(false);
     }
   }, [questions, selectedImage]);
@@ -63,25 +57,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, sourceFileName }) => 
         const base64Data = q.dataUrl.split(',')[1];
         const baseFilename = `Page${q.pageNumber}_Q${q.id || index + 1}`;
         folder?.file(`${baseFilename}.jpg`, base64Data, { base64: true });
-        
-        // If markdown analysis exists, save it as a text file
-        if (q.markdown) {
-          const infoText = `
----
-Question ID: ${q.id}
-Type: ${q.type || 'N/A'}
-Difficulty: ${q.difficulty || 'N/A'}
-Tags: ${(q.tags || []).join(', ')}
----
-
-## Question
-${q.markdown}
-
-## Analysis
-${q.analysis || 'No analysis available'}
-          `;
-          folder?.file(`${baseFilename}_info.md`, infoText.trim());
-        }
       });
 
       const content = await zip.generateAsync({ 
@@ -166,15 +141,6 @@ ${q.analysis || 'No analysis available'}
                       Cleaned
                     </span>
                   )}
-                  {q.tags && q.tags.length > 0 && (
-                    <div className="flex gap-1">
-                      {q.tags.slice(0,2).map(tag => (
-                        <span key={tag} className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-medium truncate max-w-[80px]">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
               <div 
@@ -186,11 +152,6 @@ ${q.analysis || 'No analysis available'}
                   alt={`Question ${q.id}`} 
                   className="max-w-full h-auto rounded-lg select-none shadow-sm transition-transform group-hover:scale-[1.02]"
                 />
-                {q.analysis && (
-                  <div className="absolute bottom-2 right-2 bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md font-bold shadow-sm">
-                    AI Analysis Available
-                  </div>
-                )}
               </div>
             </div>
           ))}
@@ -236,18 +197,8 @@ ${q.analysis || 'No analysis available'}
             <div className="w-full flex justify-between items-center text-white mb-4">
                <div className="flex items-center gap-4">
                  <h2 className="text-2xl font-bold">Question {selectedImage.id}</h2>
-                 {selectedImage.type && <span className="px-3 py-1 bg-white/20 rounded-full text-sm">{selectedImage.type}</span>}
-                 {selectedImage.difficulty && <span className="px-3 py-1 bg-white/20 rounded-full text-sm">{selectedImage.difficulty}</span>}
                </div>
                <div className="flex gap-4">
-                  {selectedImage.analysis && (
-                    <button 
-                      onClick={() => setShowAnalysis(!showAnalysis)}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors"
-                    >
-                      {showAnalysis ? 'Show Original Image' : 'Show AI Analysis'}
-                    </button>
-                  )}
                   <button 
                     className="text-white/50 hover:text-white p-2 transition-colors"
                     onClick={() => setSelectedImage(null)}
@@ -260,94 +211,35 @@ ${q.analysis || 'No analysis available'}
             </div>
             
             <div className="flex-1 w-full bg-white rounded-xl overflow-hidden shadow-2xl relative flex flex-col">
-              {showAnalysis && selectedImage.markdown ? (
-                <div className="w-full h-full overflow-y-auto p-8 bg-slate-50">
-                  <div className="max-w-4xl mx-auto space-y-8">
-                    {/* Tags Section */}
-                    {selectedImage.tags && (
-                      <div className="flex flex-wrap gap-2">
-                        {selectedImage.tags.map(tag => (
-                          <span key={tag} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Question Markdown */}
-                    <div className="prose prose-lg max-w-none prose-slate">
-                      <h3 className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-2">Question Text</h3>
-                      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <ReactMarkdown 
-                          remarkPlugins={[remarkMath]} 
-                          rehypePlugins={[rehypeKatex]}
-                        >
-                          {selectedImage.markdown}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-
-                    {/* Analysis Section */}
-                    {selectedImage.analysis && (
-                      <div className="prose prose-lg max-w-none prose-slate">
-                        <h3 className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-2">AI Analysis & Key Steps</h3>
-                        <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100 shadow-sm text-slate-700">
-                          <ReactMarkdown 
-                            remarkPlugins={[remarkMath]} 
-                            rehypePlugins={[rehypeKatex]}
-                          >
-                            {selectedImage.analysis}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    )}
-
-                     {/* Graphic Boxes Info */}
-                     {selectedImage.graphic_boxes_2d && selectedImage.graphic_boxes_2d.length > 0 && (
-                      <div>
-                        <h3 className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-2">Detected Figures</h3>
-                         <div className="grid grid-cols-2 gap-4">
-                            {selectedImage.graphic_boxes_2d.map((box, i) => (
-                              <div key={i} className="bg-gray-100 p-3 rounded text-xs font-mono text-gray-600">
-                                Figure {i+1} Area: [y:{Math.round(box[0])}, x:{Math.round(box[1])}] to [y:{Math.round(box[2])}, x:{Math.round(box[3])}]
-                              </div>
-                            ))}
-                         </div>
-                      </div>
-                    )}
+              <div className="relative w-full h-full bg-slate-100 flex items-center justify-center p-8">
+                {/* Compare Button Overlay */}
+                {selectedImage.originalDataUrl && (
+                  <div className="absolute top-4 left-4 z-20">
+                    <button 
+                      onMouseDown={() => setShowOriginal(true)}
+                      onMouseUp={() => setShowOriginal(false)}
+                      onMouseLeave={() => setShowOriginal(false)}
+                      onTouchStart={() => setShowOriginal(true)}
+                      onTouchEnd={() => setShowOriginal(false)}
+                      className={`
+                        px-4 py-2 rounded-full font-bold shadow-lg transition-all border-2
+                        ${showOriginal 
+                          ? 'bg-orange-500 text-white border-orange-600 scale-105' 
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }
+                      `}
+                    >
+                      {showOriginal ? 'Showing Original Crop' : 'Hold to See Original'}
+                    </button>
                   </div>
-                </div>
-              ) : (
-                <div className="relative w-full h-full bg-slate-100 flex items-center justify-center p-8">
-                  {/* Compare Button Overlay */}
-                  {selectedImage.originalDataUrl && (
-                    <div className="absolute top-4 left-4 z-20">
-                      <button 
-                        onMouseDown={() => setShowOriginal(true)}
-                        onMouseUp={() => setShowOriginal(false)}
-                        onMouseLeave={() => setShowOriginal(false)}
-                        onTouchStart={() => setShowOriginal(true)}
-                        onTouchEnd={() => setShowOriginal(false)}
-                        className={`
-                          px-4 py-2 rounded-full font-bold shadow-lg transition-all border-2
-                          ${showOriginal 
-                            ? 'bg-orange-500 text-white border-orange-600 scale-105' 
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                          }
-                        `}
-                      >
-                        {showOriginal ? 'Showing Original Crop' : 'Hold to See Original'}
-                      </button>
-                    </div>
-                  )}
+                )}
 
-                  <img 
-                    src={showOriginal && selectedImage.originalDataUrl ? selectedImage.originalDataUrl : selectedImage.dataUrl} 
-                    alt={`Full size Question ${selectedImage.id}`} 
-                    className={`max-h-full max-w-full object-contain shadow-lg transition-all duration-150 ${showOriginal ? 'ring-4 ring-orange-500' : ''}`}
-                  />
-                </div>
-              )}
+                <img 
+                  src={showOriginal && selectedImage.originalDataUrl ? selectedImage.originalDataUrl : selectedImage.dataUrl} 
+                  alt={`Full size Question ${selectedImage.id}`} 
+                  className={`max-h-full max-w-full object-contain shadow-lg transition-all duration-150 ${showOriginal ? 'ring-4 ring-orange-500' : ''}`}
+                />
+              </div>
             </div>
             
             <div className="mt-6 flex items-center justify-between w-full max-w-4xl">

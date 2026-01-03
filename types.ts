@@ -9,13 +9,6 @@ export interface BoundingBox {
 export interface DetectedQuestion {
   id: string;
   boxes_2d: [number, number, number, number][]; // Array of [ymin, xmin, ymax, xmax]
-  // Optional detailed fields
-  markdown?: string;
-  tags?: string[];
-  type?: string;
-  difficulty?: string;
-  analysis?: string;
-  graphic_boxes_2d?: [number, number, number, number][];
 }
 
 export interface QuestionImage {
@@ -23,13 +16,6 @@ export interface QuestionImage {
   pageNumber: number;
   dataUrl: string;
   originalDataUrl?: string; // Used for "Before/After" comparison if trimming occurred
-  // Metadata for UI
-  markdown?: string;
-  tags?: string[];
-  type?: string;
-  difficulty?: string;
-  analysis?: string;
-  graphic_boxes_2d?: [number, number, number, number][];
 }
 
 export interface DebugPageData {

@@ -21,7 +21,6 @@ const App: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | undefined>();
   const [detailedStatus, setDetailedStatus] = useState<string>('');
-  const [enableDetailedAnalysis, setEnableDetailedAnalysis] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3-flash-preview');
 
   // New: Crop Settings State
@@ -93,13 +92,7 @@ const App: React.FC = () => {
             id: detection.id,
             pageNumber: page.pageNumber,
             dataUrl: final,
-            originalDataUrl: original,
-            markdown: detection.markdown,
-            tags: detection.tags,
-            type: detection.type,
-            difficulty: detection.difficulty,
-            analysis: detection.analysis,
-            graphic_boxes_2d: detection.graphic_boxes_2d
+            originalDataUrl: original
           });
         }
       }
@@ -140,7 +133,7 @@ const App: React.FC = () => {
         setStatus(ProcessingStatus.DETECTING_QUESTIONS);
         setDetailedStatus(`AI identifying questions on page ${i}...`);
         
-        const detections: DetectedQuestion[] = await detectQuestionsOnPage(dataUrl, enableDetailedAnalysis, selectedModel);
+        const detections: DetectedQuestion[] = await detectQuestionsOnPage(dataUrl, selectedModel);
 
         // Store Debug Data immediately
         setRawPages(prev => [...prev, {
@@ -170,13 +163,7 @@ const App: React.FC = () => {
               id: detection.id,
               pageNumber: i,
               dataUrl: final,
-              originalDataUrl: original,
-              markdown: detection.markdown,
-              tags: detection.tags,
-              type: detection.type,
-              difficulty: detection.difficulty,
-              analysis: detection.analysis,
-              graphic_boxes_2d: detection.graphic_boxes_2d
+              originalDataUrl: original
             });
           }
         }
@@ -302,23 +289,6 @@ const App: React.FC = () => {
                      <span>🧠 Pro</span>
                     </button>
                   </div>
-                </div>
-
-                {/* Analysis Toggle Switch */}
-                <div className="flex items-center gap-3 bg-white px-5 py-3 rounded-full shadow-sm border border-slate-200">
-                  <div className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      id="detailed-toggle" 
-                      className="sr-only peer" 
-                      checked={enableDetailedAnalysis}
-                      onChange={(e) => setEnableDetailedAnalysis(e.target.checked)}
-                    />
-                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </div>
-                  <label htmlFor="detailed-toggle" className="text-sm font-medium text-slate-700 cursor-pointer select-none">
-                    Enable AI Text & Analysis Extraction <span className="text-xs text-orange-500 font-normal ml-1">(Slower)</span>
-                  </label>
                 </div>
               </div>
             </div>

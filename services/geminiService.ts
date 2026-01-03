@@ -7,15 +7,11 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
 export const detectQuestionsOnPage = async (
   base64Image: string, 
-  enableDetailedAnalysis: boolean = false,
   modelId: string = MODEL_IDS.PRO
 ): Promise<DetectedQuestion[]> => {
   try {
-    const promptText = enableDetailedAnalysis 
-      ? PROMPTS.BASIC + PROMPTS.DETAILED_SUFFIX 
-      : PROMPTS.BASIC;
-
-    const itemsSchema = enableDetailedAnalysis ? SCHEMAS.DETAILED : SCHEMAS.BASIC;
+    const promptText = PROMPTS.BASIC;
+    const itemsSchema = SCHEMAS.BASIC;
 
     const response = await ai.models.generateContent({
       model: modelId,
