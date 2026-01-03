@@ -1,5 +1,7 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore
+import { getTrimmedBounds, isContained } from '../shared/canvas-utils.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
 
@@ -29,114 +31,6 @@ export const renderPageToImage = async (page: any, scale: number = 3): Promise<{
     dataUrl: canvas.toDataURL('image/jpeg', 0.9),
     width: canvas.width,
     height: canvas.height
-  };
-};
-
-/**
- * Helper to check if box A is roughly contained inside box B
- */
-const isContained = (inner: number[], outer: number[]) => {
-  const buffer = 10; // 1% buffer
-  return (
-    inner[0] >= outer[0] - buffer && // ymin
-    inner[1] >= outer[1] - buffer && // xmin
-    inner[2] <= outer[2] + buffer && // ymax
-    inner[3] <= outer[3] + buffer    // xmax
-  );
-};
-
-/**
- * The "Edge Peel" Algorithm (User's Design).
- * 
- * Logic:
- * 1. Start from the outermost 1px line (Top/Bottom/Left/Right).
- * 2. Scan the line. If ANY black pixel is found -> This line is "dirty" (artifact or padding).
- * 3. Move to the next line inwards.
- * 4. Repeat until a line is found that contains NO black pixels (Clean Whitespace).
- * 5. STOP IMMEDIATELY. Do not trim the remaining whitespace.
- * 
- * Includes a safety limit to prevent erasing the question if the crop was too tight initially.
- */
-const getTrimmedBounds = (
-  ctx: CanvasRenderingContext2D, 
-  width: number, 
-  height: number,
-  onStatus?: (msg: string) => void
-): { x: number, y: number, w: number, h: number } => {
-  const w = Math.floor(width);
-  const h = Math.floor(height);
-
-  if (w <= 0 || h <= 0) return { x: 0, y: 0, w: 0, h: 0 };
-
-  const imageData = ctx.getImageData(0, 0, w, h);
-  const data = imageData.data;
-  const threshold = 200; // RGB < 200 is ink
-
-  // Optimized Helper: Returns true IMMEDIATELY if any pixel in row y is ink.
-  const rowHasInk = (y: number) => {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      // Alpha > 0 AND is Dark
-      if (data[i + 3] > 0 && (data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold)) {
-        return true; 
-      }
-    }
-    return false;
-  };
-
-  // Optimized Helper: Returns true IMMEDIATELY if any pixel in col x is ink.
-  const colHasInk = (x: number) => {
-    for (let y = 0; y < h; y++) {
-      const i = (y * w + x) * 4;
-      if (data[i + 3] > 0 && (data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold)) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  // Safety: Don't peel more than 30% of the image. 
-  // If we peel that much and still hit ink, assume the "edge ink" was actually the question itself.
-  const SAFETY_Y = Math.floor(h * 0.3);
-  const SAFETY_X = Math.floor(w * 0.3);
-
-  let top = 0;
-  let bottom = h;
-  let left = 0;
-  let right = w;
-
-  // --- PEEL TOP ---
-  if (onStatus) onStatus("Peeling Top Artifacts...");
-  // Eat rows ONLY IF they have ink. Stop at the first white row.
-  while (top < SAFETY_Y && rowHasInk(top)) {
-    top++;
-  }
-
-  // --- PEEL BOTTOM ---
-  if (onStatus) onStatus("Peeling Bottom Artifacts...");
-  // Eat rows ONLY IF they have ink. Stop at the first white row.
-  // Note: 'bottom' is exclusive index (height), so check bottom-1
-  while (bottom > h - SAFETY_Y && bottom > top && rowHasInk(bottom - 1)) {
-    bottom--;
-  }
-
-  // --- PEEL LEFT ---
-  if (onStatus) onStatus("Peeling Left Artifacts...");
-  while (left < SAFETY_X && colHasInk(left)) {
-    left++;
-  }
-
-  // --- PEEL RIGHT ---
-  if (onStatus) onStatus("Peeling Right Artifacts...");
-  while (right > w - SAFETY_X && right > left && colHasInk(right - 1)) {
-    right--;
-  }
-
-  return {
-    x: left,
-    y: top,
-    w: Math.max(0, right - left),
-    h: Math.max(0, bottom - top)
   };
 };
 
@@ -220,7 +114,7 @@ export const cropAndStitchImage = (
 
         if (onStatus) onStatus(`Refining fragment ${idx + 1}/${finalBoxes.length}...`);
 
-        // Apply User's "Edge Peel" Logic
+        // Apply Shared "Edge Peel" Logic
         const trim = getTrimmedBounds(tempCtx, Math.floor(w), Math.floor(h), onStatus);
 
         return {
@@ -238,10 +132,6 @@ export const cropAndStitchImage = (
       const maxFragmentWidth = Math.max(...processedFragments.map(f => f.trim.w));
       const finalWidth = maxFragmentWidth + CANVAS_PADDING_LEFT + CANVAS_PADDING_RIGHT;
       
-      const gap = settings.canvasPaddingY; // Use Y Padding as gap as well for consistency? Or keep fixed? Let's use it as gap too or fixed. 
-      // Let's keep gap somewhat related to Y padding or fixed. For now, let's use a fixed gap of 10 or make it adjustable? 
-      // User asked for "CANVAS_PADDING_Y" to be adjustable. Let's assume it affects top/bottom margins.
-      // We'll use a fixed gap of 10 for between fragments to avoid confusion, or use Y padding.
       const fragmentGap = 10; 
 
       const totalContentHeight = processedFragments.reduce((acc, f) => acc + f.trim.h, 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1)));

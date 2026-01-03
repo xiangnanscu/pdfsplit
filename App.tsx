@@ -26,7 +26,7 @@ const App: React.FC = () => {
 
   // New: Crop Settings State
   const [cropSettings, setCropSettings] = useState<CropSettings>({
-    cropPadding: 10,
+    cropPadding: 25,
     canvasPaddingLeft: 0,
     canvasPaddingRight: 0,
     canvasPaddingY: 0
