@@ -154,18 +154,41 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
                           }}
                         >
                           {det.boxes_2d.map((box, bIdx) => (
-                            <rect
-                              key={bIdx}
-                              x={box[1]} // xmin
-                              y={box[0]} // ymin
-                              width={box[3] - box[1]} // xmax - xmin
-                              height={box[2] - box[0]} // ymax - ymin
-                              fill="rgba(255, 50, 50, 0.1)"
-                              stroke="red"
-                              strokeWidth="2"
-                              vectorEffect="non-scaling-stroke"
-                              className="group-hover:fill-[rgba(255,50,50,0.3)] group-hover:stroke-[4px] transition-all duration-75"
-                            />
+                            <React.Fragment key={bIdx}>
+                              <rect
+                                x={box[1]} // xmin
+                                y={box[0]} // ymin
+                                width={box[3] - box[1]} // xmax - xmin
+                                height={box[2] - box[0]} // ymax - ymin
+                                fill="rgba(255, 50, 50, 0.1)"
+                                stroke="red"
+                                strokeWidth="2"
+                                vectorEffect="non-scaling-stroke"
+                                className="group-hover:fill-[rgba(255,50,50,0.3)] group-hover:stroke-[4px] transition-all duration-75"
+                              />
+                              {/* Display fragment index if there are multiple boxes */}
+                              {det.boxes_2d.length > 1 && (
+                                <g style={{ pointerEvents: 'none' }}>
+                                  <circle 
+                                    cx={box[1] + 20} 
+                                    cy={box[0] + 20} 
+                                    r="15" 
+                                    fill="rgba(220, 38, 38, 0.9)" 
+                                  />
+                                  <text
+                                    x={box[1] + 20}
+                                    y={box[0] + 20}
+                                    dy="0.35em"
+                                    textAnchor="middle"
+                                    fill="white"
+                                    fontSize="20"
+                                    fontWeight="bold"
+                                  >
+                                    {bIdx + 1}
+                                  </text>
+                                </g>
+                              )}
+                            </React.Fragment>
                           ))}
                           {/* ID Label - Top Right inside the FIRST box */}
                           {/* x = xmax - padding, y = ymin + font_size */}

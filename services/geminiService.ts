@@ -5,8 +5,13 @@ import { PROMPTS, SCHEMAS, MODEL_IDS } from "../shared/ai-config.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
+/**
+ * Detects questions on a single image.
+ * @param image Base64 image string (data:image/jpeg;base64,...)
+ * @param modelId 
+ */
 export const detectQuestionsOnPage = async (
-  base64Image: string, 
+  image: string, 
   modelId: string = MODEL_IDS.PRO
 ): Promise<DetectedQuestion[]> => {
   try {
@@ -21,12 +26,10 @@ export const detectQuestionsOnPage = async (
             {
               inlineData: {
                 mimeType: 'image/jpeg',
-                data: base64Image.split(',')[1]
+                data: image.split(',')[1]
               }
             },
-            {
-              text: promptText
-            }
+            { text: promptText }
           ]
         }
       ],

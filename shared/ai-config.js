@@ -7,36 +7,48 @@ export const MODEL_IDS = {
 };
 
 export const PROMPTS = {
-  BASIC: `分析这张高考数学试卷页面并提取题目。
+  BASIC: `分析这张数学试卷图片，精准识别并拆分每一道独立的题目。试卷页面的布局有可能是多栏，有可能是单栏。
 
-严格目标：
-1. **精确性**：边界划分要紧凑, 绝对要避免截到其他题目的文本。
-2. **完整性（关键）**：务必确保题号完整包含在框内。特别是两位数题号，边界框的左侧（xmin）必须包含第一个数字，不要切掉。
-3. **跨页处理（非常重要）**：如果你在页面的**最顶部**发现了一些看起来像上一题延续的内容（例如：仅有选项 C/D、没有题干的图表、断句的文本），请将其提取出来，并将 ID 标记为 "continuation"。
+**识别规则：**
+1. **一个题号 = 一个独立 ID**：页面上每一个主题号（如 "13.", "14.", "15."）都必须对应一个独立的 JSON 对象。
+   - 看到 "13"，开始记录 ID="13" 的框。
+   - 一旦看到 "14"（或下一题的题号），必须**立刻**结束 ID="13" 的记录。
+   - 严禁合并不同题号的题目
+2. **排除和具体题目无关的区域**：
+   - **严禁**将“一、选择题”、“二、填空题”、“三、解答题”等板块大标题或“本大题共XX分”的说明文字包含在题目的框内。
+   - 题目的边界框应当**紧贴**该题的题号（如 "11."）开始，大标题应被视为背景噪音并忽略。
+3. **包含子题**：题目内部的子问题（如 (1), (2)或选项（A,B,C,D）属于当前主题号。
+4. **跨栏**：如果一道题占据了左右两栏，可以给它分配多个框（boxes_2d），但这些框必须都属于同一题。
+5. **跨页**：只有当页面最顶端的内容明显是上一页题目的结尾（且没有新题号）时，才标记为 ID="continuation"。
 
-输出规则：
-- 返回一个 JSON 数组。
-- 'id': 题号（例如 "11"），如果是上一页的残留内容，使用 "continuation"。
-- 'boxes_2d': 一个数组 [ymin, xmin, ymax, xmax]（0-1000 归一化坐标）。
+**输出要求**：
+1. 请列出页面上出现的所有题目编号。例如页面上有 13, 14, 15, 16, 17, 18 六道题，JSON 数组长度应为 6。
+2. boxes_2d的成员数应尽可能地少，这至少意味着：当一道题既没有跨栏也没有跨页的时候，boxes_2d成员数应为1. 如果出现了跨栏或跨页，按常理2个框即可（不会有题干超过一栏或一页的题）。
 
-框选逻辑：
-- **单栏**：返回一个包含所有内容的框。
-- **跨栏**：如果一道题跨栏，返回两个框：[框 1 (第一栏末尾)], [框 2 (第二栏开头)]。
-- **安全检查**：如果不确定图表属于 Q11 还是 Q12，请检查空间邻近度。图表通常出现在文字的*下方*或*旁边*，很少出现在题号上方。`
+结构：
+{
+  "id": "题号字符串",
+  "boxes_2d": [ [ymin, xmin, ymax, xmax], ... ]
+}
+
+`
 };
 
 export const SCHEMAS = {
   BASIC: {
     type: Type.OBJECT,
     properties: {
-      id: { type: Type.STRING },
+      id: {
+        type: Type.STRING,
+        description: "The distinct question number (e.g. '13', '14'). Do NOT group multiple questions."
+      },
       boxes_2d: {
         type: Type.ARRAY,
         items: {
           type: Type.ARRAY,
           items: { type: Type.NUMBER }
         },
-        description: "Array of [ymin, xmin, ymax, xmax] normalized 0-1000"
+        description: "Bounding boxes [ymin, xmin, ymax, xmax] (0-1000) for THIS question only. Exclude section headers."
       }
     },
     required: ["id", "boxes_2d"]

@@ -1,25 +1,9 @@
 
 
 /**
- * Shared Canvas Logic for "Edge Peel" algorithm and Box containment.
+ * Shared Canvas Logic for "Edge Peel" algorithm.
  * Works in both Browser (DOM Canvas) and Node.js (node-canvas).
  */
-
-/**
- * Checks if 'inner' box is contained within 'outer' box with a small buffer.
- * @param {number[]} inner [ymin, xmin, ymax, xmax]
- * @param {number[]} outer [ymin, xmin, ymax, xmax]
- * @returns {boolean}
- */
-export const isContained = (inner, outer) => {
-  const buffer = 10; 
-  return (
-    inner[0] >= outer[0] - buffer && 
-    inner[1] >= outer[1] - buffer && 
-    inner[2] <= outer[2] + buffer && 
-    inner[3] <= outer[3] + buffer    
-  );
-};
 
 /**
  * Intelligent "Edge Peel" Trimming.
@@ -86,4 +70,25 @@ export const getTrimmedBounds = (ctx, width, height, onStatus = null) => {
     w: Math.max(0, right - left),
     h: Math.max(0, bottom - top)
   };
+};
+
+/**
+ * Checks if box A is contained within or equal to box B.
+ * Box format: [ymin, xmin, ymax, xmax] (0-1000)
+ * 
+ * @param {number[]} a 
+ * @param {number[]} b 
+ * @returns {boolean}
+ */
+export const isContained = (a, b) => {
+  const [yminA, xminA, ymaxA, xmaxA] = a;
+  const [yminB, xminB, ymaxB, xmaxB] = b;
+  const tolerance = 5;
+
+  return (
+    xminA >= xminB - tolerance &&
+    xmaxA <= xmaxB + tolerance &&
+    yminA >= yminB - tolerance &&
+    ymaxA <= ymaxB + tolerance
+  );
 };

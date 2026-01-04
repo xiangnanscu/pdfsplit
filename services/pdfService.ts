@@ -1,4 +1,3 @@
-
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
 import { getTrimmedBounds, isContained } from '../shared/canvas-utils.js';
@@ -32,6 +31,33 @@ export const renderPageToImage = async (page: any, scale: number = 3): Promise<{
     width: canvas.width,
     height: canvas.height
   };
+};
+
+/**
+ * Creates a lower resolution copy of a base64 image for faster AI processing.
+ */
+export const createLowResCopy = async (base64: string, scaleFactor: number = 0.5): Promise<{ dataUrl: string, width: number, height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = Math.floor(img.width * scaleFactor);
+      const h = Math.floor(img.height * scaleFactor);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error("Canvas context failed"));
+      
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve({
+        dataUrl: canvas.toDataURL('image/jpeg', 0.8),
+        width: w,
+        height: h
+      });
+    };
+    img.onerror = reject;
+    img.src = base64;
+  });
 };
 
 /**
@@ -127,11 +153,11 @@ export const mergeBase64Images = async (topBase64: string, bottomBase64: string)
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
 
-  // Draw Top (Centered)
-  ctx.drawImage(imgTop, (width - imgTop.width) / 2, 0);
+  // Draw Top (Left Aligned)
+  ctx.drawImage(imgTop, 0, 0);
   
-  // Draw Bottom (Centered)
-  ctx.drawImage(imgBottom, (width - imgBottom.width) / 2, imgTop.height);
+  // Draw Bottom (Left Aligned)
+  ctx.drawImage(imgBottom, 0, imgTop.height);
 
   return canvas.toDataURL('image/jpeg', 0.95);
 };
@@ -156,35 +182,40 @@ export const cropAndStitchImage = (
       return;
     }
 
-    // 1. Filter out contained boxes (Deduplication)
-    const getArea = (b: number[]) => (b[2] - b[0]) * (b[3] - b[1]);
-    const sortedBySize = [...boxes].sort((a, b) => getArea(b) - getArea(a));
+    // 1. Filter out contained boxes (Deduplication) while preserving original order.
+    // We strictly respect the order returned by the AI (boxes_2d), assuming the Prompt ensures Left->Right, Top->Bottom.
     
-    const finalBoxes: [number, number, number, number][] = [];
+    const indicesToDrop = new Set<number>();
     
-    for (const box of sortedBySize) {
-      const isRedundant = finalBoxes.some(keeper => isContained(box, keeper));
-      if (!isRedundant) {
-        finalBoxes.push(box);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = 0; j < boxes.length; j++) {
+        if (i === j) continue;
+        
+        // Check if box[i] is contained in box[j]
+        if (isContained(boxes[i], boxes[j])) {
+           const iContainsJ = isContained(boxes[j], boxes[i]);
+           
+           if (iContainsJ) {
+              // Mutual containment (effectively identical). 
+              // Drop the later one to avoid duplicates.
+              if (i > j) {
+                 indicesToDrop.add(i);
+                 break;
+              }
+           } else {
+              // Strict containment: i is inside j. Drop i.
+              indicesToDrop.add(i);
+              break;
+           }
+        }
       }
     }
 
-    // 2. Sorting Logic: Priority to Left-to-Right (Columns), then Top-to-Bottom
-    finalBoxes.sort((a, b) => {
-      const centerXA = (a[1] + a[3]) / 2;
-      const centerXB = (b[1] + b[3]) / 2;
-      
-      if (Math.abs(centerXA - centerXB) > 150) {
-        return centerXA - centerXB; // Left comes first
-      }
-      return a[0] - b[0];
-    });
+    const finalBoxes = boxes.filter((_, i) => !indicesToDrop.has(i));
 
     const img = new Image();
     img.onload = () => {
       // 3. Define padding parameters from Settings
-      // We grab EXTRA CROP_PADDING to ensure we capture the full question. 
-      // The intelligent `getTrimmedBounds` will peel off the neighbors ONLY if they are artifacts.
       const CROP_PADDING = settings.cropPadding; 
       const CANVAS_PADDING_LEFT = settings.canvasPaddingLeft;
       const CANVAS_PADDING_RIGHT = settings.canvasPaddingRight;
@@ -221,18 +252,27 @@ export const cropAndStitchImage = (
 
         return {
           sourceCanvas: tempCanvas,
-          trim: trim, 
+          trim: trim,
+          // Calculate the absolute X position of the *ink* on the original page.
+          // This allows us to preserve relative indentation even after trimming.
+          // x = crop start X, trim.x = whitespace removed from left
+          absInkX: x + trim.x 
         };
-      }).filter(Boolean) as { sourceCanvas: HTMLCanvasElement, trim: {x: number, y: number, w: number, h: number} }[];
+      }).filter(Boolean) as { sourceCanvas: HTMLCanvasElement, trim: {x: number, y: number, w: number, h: number}, absInkX: number }[];
 
       if (processedFragments.length === 0) {
         resolve({ final: '' });
         return;
       }
 
-      // 5. Determine final canvas size based on TRIMMED sizes
-      const maxFragmentWidth = Math.max(...processedFragments.map(f => f.trim.w));
-      const finalWidth = maxFragmentWidth + CANVAS_PADDING_LEFT + CANVAS_PADDING_RIGHT;
+      // 5. Determine final canvas size
+      // Find the leftmost ink position across all fragments to serve as the anchor (relative 0)
+      const minAbsInkX = Math.min(...processedFragments.map(f => f.absInkX));
+      
+      // Calculate the required width to hold all fragments while preserving their relative X offsets
+      // Width = Max(RelativeX + Width)
+      const maxRightEdge = Math.max(...processedFragments.map(f => (f.absInkX - minAbsInkX) + f.trim.w));
+      const finalWidth = maxRightEdge + CANVAS_PADDING_LEFT + CANVAS_PADDING_RIGHT;
       
       const fragmentGap = 10; 
 
@@ -250,12 +290,12 @@ export const cropAndStitchImage = (
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // 6. Draw each fragment using the trimmed coordinates
+      // 6. Draw each fragment using the trimmed coordinates + Relative Indentation
       let currentY = CANVAS_PADDING_Y;
       processedFragments.forEach((f) => {
-        // Center relative to widest fragment
-        const centerOffset = (maxFragmentWidth - f.trim.w) / 2;
-        const offsetX = CANVAS_PADDING_LEFT + centerOffset;
+        // Calculate relative indentation offset
+        const relativeOffset = f.absInkX - minAbsInkX;
+        const offsetX = CANVAS_PADDING_LEFT + relativeOffset;
         
         ctx.drawImage(
           f.sourceCanvas, 
@@ -267,8 +307,7 @@ export const cropAndStitchImage = (
 
       const finalDataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
-      // --- 7. Generate Original (Unpeeled) Image for Comparison (Only if trimmed) ---
-      // We check if we peeled MORE than 0 pixels.
+      // --- 7. Generate Original (Unpeeled) Image for Comparison ---
       const wasTrimmed = processedFragments.some(f => 
         f.trim.w < f.sourceCanvas.width || f.trim.h < f.sourceCanvas.height
       );
@@ -292,9 +331,9 @@ export const cropAndStitchImage = (
              
              let currentRawY = CANVAS_PADDING_Y;
              processedFragments.forEach(f => {
-                 const centerOffset = (maxRawWidth - f.sourceCanvas.width) / 2;
-                 const offsetX = CANVAS_PADDING_LEFT + centerOffset;
-                 // Draw full source without trim coordinates
+                 // For raw view, we just left-align simply, as 'absInkX' logic applies to trimmed ink.
+                 // This gives a good comparison of "Raw Crop" vs "Smart Clean Layout"
+                 const offsetX = CANVAS_PADDING_LEFT;
                  rawCtx.drawImage(f.sourceCanvas, offsetX, currentRawY);
                  currentRawY += f.sourceCanvas.height + fragmentGap;
              });
