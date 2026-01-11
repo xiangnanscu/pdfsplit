@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
@@ -40,8 +39,41 @@ const App: React.FC = () => {
   });
   
   const [isReprocessing, setIsReprocessing] = useState(false);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  // Fix: Use ReturnType<typeof setTimeout> instead of NodeJS.Timeout to avoid namespace error
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // 初始化检查 URL query param
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const zipUrl = params.get('zip');
+
+    if (zipUrl) {
+      const loadRemoteZip = async () => {
+        try {
+          setStatus(ProcessingStatus.LOADING_PDF);
+          setDetailedStatus(`正在下载远程数据: ${zipUrl}`);
+          
+          const response = await fetch(zipUrl);
+          if (!response.ok) {
+            throw new Error(`无法下载文件 (Status: ${response.status})`);
+          }
+          
+          const blob = await response.blob();
+          const fileName = zipUrl.split('/').pop() || 'remote_debug.zip';
+          
+          await processZipData(blob, fileName);
+          setShowDebug(true); // 自动切换到调试视图
+        } catch (err: any) {
+          console.error("Remote ZIP load failed:", err);
+          setError(err.message || "远程 ZIP 下载失败");
+          setStatus(ProcessingStatus.ERROR);
+        }
+      };
+      
+      loadRemoteZip();
+    }
+  }, []);
 
   const handleReset = () => {
     if (abortControllerRef.current) {
@@ -59,6 +91,11 @@ const App: React.FC = () => {
     setError(undefined);
     setDetailedStatus('');
     setShowDebug(false);
+    
+    // Clear URL params on reset if present
+    if (window.location.search) {
+      window.history.pushState({}, '', window.location.pathname);
+    }
   };
 
   useEffect(() => {
@@ -122,13 +159,13 @@ const App: React.FC = () => {
     setQuestions(updatedQuestions);
   };
 
-  const handleZipUpload = async (file: File) => {
+  const processZipData = async (blob: Blob, fileName: string) => {
     try {
       setStatus(ProcessingStatus.LOADING_PDF);
       setDetailedStatus('正在解析 ZIP 文件...');
       
       const zip = new JSZip();
-      const loadedZip = await zip.loadAsync(file);
+      const loadedZip = await zip.loadAsync(blob);
       
       // Look for analysis_data.json
       let analysisJsonFile: JSZip.JSZipObject | null = null;
@@ -159,7 +196,7 @@ const App: React.FC = () => {
 
       setRawPages(loadedRawPages);
       setTotal(loadedRawPages.length);
-      setUploadedFileName(file.name.replace(/\.[^/.]+$/, ""));
+      setUploadedFileName(fileName.replace(/\.[^/.]+$/, ""));
 
       // Try to reconstruct individual questions from the ZIP
       const reconstructedQuestions: QuestionImage[] = [];
@@ -179,7 +216,6 @@ const App: React.FC = () => {
       
       for (const qf of questionFiles) {
         // Try to guess ID and page from filename. Standard export: {FileName}_{ID}.jpg
-        // Note: Filename might be complex.
         const baseName = qf.name.replace(/\.[^/.]+$/, "");
         const parts = baseName.split('_');
         const id = parts.pop() || 'unknown'; 
@@ -209,6 +245,7 @@ const App: React.FC = () => {
       console.error(err);
       setError(err.message || "ZIP 加载失败。");
       setStatus(ProcessingStatus.ERROR);
+      throw err; // Re-throw for caller handling if needed
     }
   };
 
@@ -217,7 +254,7 @@ const App: React.FC = () => {
     if (!file) return;
 
     if (file.name.endsWith('.zip')) {
-      handleZipUpload(file);
+      processZipData(file, file.name);
       return;
     }
 
