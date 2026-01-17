@@ -8,7 +8,7 @@ export interface BoundingBox {
 
 export interface DetectedQuestion {
   id: string;
-  boxes_2d: [number, number, number, number][]; // Array of [ymin, xmin, ymax, xmax]
+  boxes_2d: [number, number, number, number]; // Array of [ymin, xmin, ymax, xmax]
 }
 
 export interface QuestionImage {

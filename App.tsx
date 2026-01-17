@@ -129,44 +129,42 @@ const App: React.FC = () => {
     
     for (let i = 0; i < rawPages.length; i++) {
       const page = rawPages[i];
-      let detections = page.detections;
-
-      if (detections.length > 0 && detections[0].id === 'continuation') {
-        const orphan = detections[0];
-        const { final: orphanImg } = await cropAndStitchImage(
+      
+      for (const detection of page.detections) {
+        const { final, original } = await cropAndStitchImage(
           page.dataUrl, 
-          orphan.boxes_2d, 
+          [detection.boxes_2d], 
           page.width, 
           page.height, 
           cropSettings
         );
-        if (updatedQuestions.length > 0 && orphanImg) {
-          const lastQ = updatedQuestions[updatedQuestions.length - 1];
-          const stitchedImg = await mergeBase64Images(lastQ.dataUrl, orphanImg, -cropSettings.mergeOverlap);
-          lastQ.dataUrl = stitchedImg;
-        }
-        detections = detections.slice(1);
-      }
-
-      for (const detection of detections) {
-        const { final, original } = await cropAndStitchImage(
-          page.dataUrl, 
-          detection.boxes_2d, 
-          page.width, 
-          page.height,
-          cropSettings 
-        );
+        
         if (final) {
-          updatedQuestions.push({
-            id: detection.id,
-            pageNumber: page.pageNumber,
-            dataUrl: final,
-            originalDataUrl: original
-          });
+          if (detection.id === 'continuation' && updatedQuestions.length > 0) {
+            const lastQ = updatedQuestions[updatedQuestions.length - 1];
+            const stitchedImg = await mergeBase64Images(lastQ.dataUrl, final, -cropSettings.mergeOverlap);
+            lastQ.dataUrl = stitchedImg;
+          } else {
+            updatedQuestions.push({
+              id: detection.id,
+              pageNumber: page.pageNumber,
+              dataUrl: final,
+              originalDataUrl: original
+            });
+          }
         }
       }
     }
     setQuestions(updatedQuestions);
+  };
+
+  const handleReprocess = async () => {
+    if (rawPages.length === 0) return;
+    setIsReprocessing(true);
+    // Give UI a chance to render the spinner
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await reprocessAllCrops();
+    setIsReprocessing(false);
   };
 
   // Extract core AI logic to be reusable for "Re-identify"
@@ -231,43 +229,31 @@ const App: React.FC = () => {
       for (let i = 0; i < results.length; i++) {
         if (signal.aborted) return;
         const page = results[i];
-        let detections = page.detections;
         setProgress(i + 1);
 
-        if (detections.length > 0 && detections[0].id === 'continuation') {
-          const orphan = detections[0];
-          const { final: orphanImg } = await cropAndStitchImage(
-            page.dataUrl, 
-            orphan.boxes_2d, 
-            page.width, 
-            page.height, 
-            cropSettings
-          );
-          if (allExtractedQuestions.length > 0 && orphanImg) {
-            const lastQ = allExtractedQuestions[allExtractedQuestions.length - 1];
-            const stitchedImg = await mergeBase64Images(lastQ.dataUrl, orphanImg, -cropSettings.mergeOverlap);
-            lastQ.dataUrl = stitchedImg;
-          }
-          setCroppingDone(prev => prev + 1);
-          detections = detections.slice(1);
-        }
-
-        for (const detection of detections) {
+        for (const detection of page.detections) {
           if (signal.aborted) return;
           const { final, original } = await cropAndStitchImage(
             page.dataUrl, 
-            detection.boxes_2d, 
+            [detection.boxes_2d], 
             page.width, 
             page.height,
             cropSettings
           );
+          
           if (final) {
-            allExtractedQuestions.push({
-              id: detection.id,
-              pageNumber: page.pageNumber,
-              dataUrl: final,
-              originalDataUrl: original
-            });
+            if (detection.id === 'continuation' && allExtractedQuestions.length > 0) {
+              const lastQ = allExtractedQuestions[allExtractedQuestions.length - 1];
+              const stitchedImg = await mergeBase64Images(lastQ.dataUrl, final, -cropSettings.mergeOverlap);
+              lastQ.dataUrl = stitchedImg;
+            } else {
+              allExtractedQuestions.push({
+                id: detection.id,
+                pageNumber: page.pageNumber,
+                dataUrl: final,
+                originalDataUrl: original
+              });
+            }
           }
           setCroppingDone(prev => prev + 1);
         }
@@ -506,6 +492,16 @@ const App: React.FC = () => {
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                   重新识别
+                </button>
+
+                <button 
+                  onClick={handleReprocess}
+                  disabled={isReprocessing}
+                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-1.5 border-l border-slate-100 ml-1 pl-3 disabled:opacity-50"
+                  title="使用现有的检测数据重新执行切割算法 (Debug)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm0-5.758a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z" /></svg>
+                  重新切割
                 </button>
              </div>
 

@@ -51,15 +51,15 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
       img.src = page.dataUrl;
       await new Promise((resolve) => { img.onload = resolve; });
 
-      const fragments = detection.boxes_2d.map(box => {
-        const [ymin, xmin, ymax, xmax] = box;
-        // Convert normalized 0-1000 to pixels
-        const x = Math.floor((xmin / 1000) * page.width);
-        const y = Math.floor((ymin / 1000) * page.height);
-        const w = Math.floor(((xmax - xmin) / 1000) * page.width);
-        const h = Math.floor(((ymax - ymin) / 1000) * page.height);
-        return { x, y, w, h };
-      });
+      // boxes_2d is now a single box [ymin, xmin, ymax, xmax]
+      const box = detection.boxes_2d;
+      // Convert normalized 0-1000 to pixels
+      const x = Math.floor((box[1] / 1000) * page.width);
+      const y = Math.floor((box[0] / 1000) * page.height);
+      const w = Math.floor(((box[3] - box[1]) / 1000) * page.width);
+      const h = Math.floor(((box[2] - box[0]) / 1000) * page.height);
+      
+      const fragments = [{ x, y, w, h }];
 
       const totalHeight = fragments.reduce((acc, f) => acc + f.h, 0);
       const maxWidth = Math.max(...fragments.map(f => f.w));
@@ -153,48 +153,22 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
                             setSelectedIndex(globalIndex);
                           }}
                         >
-                          {det.boxes_2d.map((box, bIdx) => (
-                            <React.Fragment key={bIdx}>
-                              <rect
-                                x={box[1]} // xmin
-                                y={box[0]} // ymin
-                                width={box[3] - box[1]} // xmax - xmin
-                                height={box[2] - box[0]} // ymax - ymin
-                                fill="rgba(255, 50, 50, 0.1)"
-                                stroke="red"
-                                strokeWidth="2"
-                                vectorEffect="non-scaling-stroke"
-                                className="group-hover:fill-[rgba(255,50,50,0.3)] group-hover:stroke-[4px] transition-all duration-75"
-                              />
-                              {/* Display fragment index if there are multiple boxes */}
-                              {det.boxes_2d.length > 1 && (
-                                <g style={{ pointerEvents: 'none' }}>
-                                  <circle 
-                                    cx={box[1] + 20} 
-                                    cy={box[0] + 20} 
-                                    r="15" 
-                                    fill="rgba(220, 38, 38, 0.9)" 
-                                  />
-                                  <text
-                                    x={box[1] + 20}
-                                    y={box[0] + 20}
-                                    dy="0.35em"
-                                    textAnchor="middle"
-                                    fill="white"
-                                    fontSize="20"
-                                    fontWeight="bold"
-                                  >
-                                    {bIdx + 1}
-                                  </text>
-                                </g>
-                              )}
-                            </React.Fragment>
-                          ))}
-                          {/* ID Label - Top Right inside the FIRST box */}
-                          {/* x = xmax - padding, y = ymin + font_size */}
+                          <rect
+                            x={det.boxes_2d[1]} // xmin
+                            y={det.boxes_2d[0]} // ymin
+                            width={det.boxes_2d[3] - det.boxes_2d[1]} // xmax - xmin
+                            height={det.boxes_2d[2] - det.boxes_2d[0]} // ymax - ymin
+                            fill="rgba(255, 50, 50, 0.1)"
+                            stroke="red"
+                            strokeWidth="2"
+                            vectorEffect="non-scaling-stroke"
+                            className="group-hover:fill-[rgba(255,50,50,0.3)] group-hover:stroke-[4px] transition-all duration-75"
+                          />
+                          
+                          {/* ID Label - Top Right inside the box */}
                           <text
-                            x={det.boxes_2d[0][3] - 10}
-                            y={det.boxes_2d[0][0] + 35}
+                            x={det.boxes_2d[3] - 10}
+                            y={det.boxes_2d[0] + 35}
                             fill="#991b1b" // Deep Red (red-800)
                             fontSize="40"
                             fontWeight="900"
@@ -238,12 +212,12 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
                         Q{det.id}
                       </div>
                       <div className="text-[10px] font-mono text-slate-600">
-                         {det.boxes_2d.length > 1 ? `${det.boxes_2d.length} fragments` : 'Single box'}
+                         Single box
                       </div>
                     </div>
                     <div className="text-right">
-                       <span className="text-[10px] font-mono text-slate-500 block">y:{Math.round(det.boxes_2d[0][0])}</span>
-                       <span className="text-[10px] font-mono text-slate-500 block">x:{Math.round(det.boxes_2d[0][1])}</span>
+                       <span className="text-[10px] font-mono text-slate-500 block">y:{Math.round(det.boxes_2d[0])}</span>
+                       <span className="text-[10px] font-mono text-slate-500 block">x:{Math.round(det.boxes_2d[1])}</span>
                     </div>
                   </button>
                 );
@@ -308,7 +282,7 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
              <div className="bg-yellow-50 px-6 py-3 text-xs text-yellow-800 border-t border-yellow-100 flex justify-between items-center">
                <span>⚠️ Displaying exact coordinates (0px padding, No cleaning).</span>
                <span className="font-mono text-yellow-900/50 hidden sm:inline">
-                  {allItems[selectedIndex].detection.boxes_2d.map(b => `[${Math.round(b[0])},${Math.round(b[1])}]`).join(' + ')}
+                  {`[${Math.round(allItems[selectedIndex].detection.boxes_2d[0])},${Math.round(allItems[selectedIndex].detection.boxes_2d[1])}]`}
                </span>
              </div>
           </div>
