@@ -9,9 +9,10 @@ import { DebugRawView } from './components/DebugRawView';
 import { renderPageToImage, constructQuestionCanvas, mergeCanvasesVertical, analyzeCanvasContent, generateAlignedImage, CropSettings } from './services/pdfService';
 import { detectQuestionsOnPage } from './services/geminiService';
 
-// Updated default settings for better alignment
+// Updated default settings: Smaller Y padding (5px) to prevent overlap with next question
 const DEFAULT_SETTINGS: CropSettings = {
-  cropPadding: 15,
+  cropPaddingX: 15,
+  cropPaddingY: 5,
   canvasPaddingLeft: 10,
   canvasPaddingRight: 10,
   canvasPaddingY: 10,
@@ -75,6 +76,7 @@ const App: React.FC = () => {
           const blob = await response.blob();
           const fileName = zipUrl.split('/').pop() || 'remote_debug.zip';
           await processZipData(blob, fileName);
+          // Remote load might prefer debug view, but general user usually wants grid
           setShowDebug(true);
         } catch (err: any) {
           setError(err.message || "远程 ZIP 下载失败");
@@ -117,22 +119,21 @@ const App: React.FC = () => {
     setCompletedCount(0);
     setDetailedStatus('正在精确切割并对齐题目图片...');
 
-    // Group pages by file to handle per-file alignment
+    // Group pages by file to handle per-file alignment logic (continuations)
     const pagesByFile: Record<string, DebugPageData[]> = {};
     pages.forEach(p => {
       if (!pagesByFile[p.fileName]) pagesByFile[p.fileName] = [];
       pagesByFile[p.fileName].push(p);
     });
 
-    let allExtractedQuestions: QuestionImage[] = [];
+    const allConstructedItems: ProcessedCanvas[] = [];
 
     try {
-      // Process file by file
+      // Phase 1: Construction (File by File)
       for (const [fileName, filePages] of Object.entries(pagesByFile)) {
         if (signal.aborted) return;
         
-        // --- Phase 1: Construction ---
-        const constructedItems: ProcessedCanvas[] = [];
+        const fileItems: ProcessedCanvas[] = [];
         
         for (let i = 0; i < filePages.length; i++) {
           if (signal.aborted) return;
@@ -146,22 +147,22 @@ const App: React.FC = () => {
             const result = await constructQuestionCanvas(page.dataUrl, boxes, page.width, page.height, settings);
             
             if (result.canvas) {
-              if (detection.id === 'continuation' && constructedItems.length > 0) {
-                 // Merge with previous question
-                 const lastIdx = constructedItems.length - 1;
-                 const lastQ = constructedItems[lastIdx];
+              if (detection.id === 'continuation' && fileItems.length > 0) {
+                 // Merge with previous question within the same file
+                 const lastIdx = fileItems.length - 1;
+                 const lastQ = fileItems[lastIdx];
                  
                  const merged = mergeCanvasesVertical(lastQ.canvas, result.canvas, settings.mergeOverlap);
                  
                  // Update the last entry
-                 constructedItems[lastIdx] = {
+                 fileItems[lastIdx] = {
                    ...lastQ,
                    canvas: merged.canvas,
                    width: merged.width,
                    height: merged.height
                  };
               } else {
-                 constructedItems.push({
+                 fileItems.push({
                    id: detection.id,
                    pageNumber: page.pageNumber,
                    fileName: page.fileName,
@@ -175,20 +176,29 @@ const App: React.FC = () => {
             setCroppingDone(prev => prev + 1);
           }
         }
+        allConstructedItems.push(...fileItems);
+      }
 
-        // --- Phase 2: Batch Alignment ---
-        if (constructedItems.length > 0) {
-           // A. Analyze all items to find their content bounds
-           const itemsWithTrim = constructedItems.map(item => ({
+      // Phase 2: Batch Analysis and Alignment
+      if (allConstructedItems.length > 0) {
+          setDetailedStatus('正在分析并对齐所有图片...');
+          
+          // A. Analyze all items to find their content bounds (Trimmed Width)
+          const itemsWithTrim = allConstructedItems.map(item => ({
              ...item,
              trim: analyzeCanvasContent(item.canvas)
-           }));
+          }));
+          
+          // B. Find Global Max Content Width across all files
+          // This ensures all questions have the same width, aligned to the widest one.
+          const maxContentWidth = Math.max(...itemsWithTrim.map(i => i.trim.w));
 
-           // B. Find Global Max Content Width for this file
-           const maxContentWidth = Math.max(...itemsWithTrim.map(i => i.trim.w));
-           
-           // C. Generate Aligned Images
-           for (const item of itemsWithTrim) {
+          setDetailedStatus(`正在生成最终图片 (宽度对齐至 ${maxContentWidth}px)...`);
+
+          const finalQuestions: QuestionImage[] = [];
+          
+          // C. Generate Aligned Images
+          for (const item of itemsWithTrim) {
               if (signal.aborted) return;
               
               const finalDataUrl = await generateAlignedImage(
@@ -198,18 +208,19 @@ const App: React.FC = () => {
                   settings
               );
               
-              allExtractedQuestions.push({
+              finalQuestions.push({
                  id: item.id,
                  pageNumber: item.pageNumber,
                  fileName: item.fileName,
                  dataUrl: finalDataUrl,
                  originalDataUrl: item.originalDataUrl
               });
-           }
-        }
+          }
+          setQuestions(finalQuestions);
+      } else {
+          setQuestions([]);
       }
 
-      setQuestions(allExtractedQuestions);
       setStatus(ProcessingStatus.COMPLETED);
     } catch (e: any) {
       if (signal.aborted) return;
@@ -274,36 +285,138 @@ const App: React.FC = () => {
   const processZipData = async (blob: Blob, fileName: string) => {
     try {
       setStatus(ProcessingStatus.LOADING_PDF);
-      setDetailedStatus('正在解析 ZIP 文件...');
+      setDetailedStatus('正在解析 ZIP 文件结构...');
       const zip = new JSZip();
       const loadedZip = await zip.loadAsync(blob);
-      let analysisJsonFile = loadedZip.file(/analysis_data\.json$/i)[0];
-
-      if (!analysisJsonFile) throw new Error('ZIP 中未找到 analysis_data.json');
-      const jsonText = await analysisJsonFile.async('text');
+      
+      // 1. Locate analysis_data.json robustly
+      const analysisFileKey = Object.keys(loadedZip.files).find(key => key.match(/(^|\/)analysis_data\.json$/i));
+      
+      if (!analysisFileKey) throw new Error('ZIP 中未找到 analysis_data.json 数据文件');
+      const jsonText = await loadedZip.file(analysisFileKey)!.async('text');
       const loadedRawPages = JSON.parse(jsonText) as DebugPageData[];
       
+      // 2. Restore Full Page Images to memory
       for (const page of loadedRawPages) {
-        // Fix: Ensure fileName exists for backward compatibility or malformed JSON
         const rawFileName = page.fileName || "unknown_file";
         page.fileName = rawFileName;
-        
         const safeFileName = rawFileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         
-        let imgFile = loadedZip.file(new RegExp(`full_pages/${safeFileName}/Page_${page.pageNumber}\\.jpg$`, 'i'))[0] 
-                     || loadedZip.file(new RegExp(`full_pages/Page_${page.pageNumber}\\.jpg$`, 'i'))[0];
+        const imgKey = Object.keys(loadedZip.files).find(k => 
+             !loadedZip.files[k].dir &&
+             (k.match(new RegExp(`full_pages/${safeFileName}/Page_${page.pageNumber}\\.jpg$`, 'i')) ||
+              k.match(new RegExp(`full_pages/Page_${page.pageNumber}\\.jpg$`, 'i')))
+        );
         
-        if (imgFile) {
-          const base64 = await imgFile.async('base64');
+        if (imgKey) {
+          const base64 = await loadedZip.file(imgKey)!.async('base64');
           page.dataUrl = `data:image/jpeg;base64,${base64}`;
         }
       }
+      
       setRawPages(loadedRawPages);
       setSourcePages(loadedRawPages.map(({detections, ...rest}) => rest));
       setTotal(loadedRawPages.length);
-      await runCroppingPhase(loadedRawPages, cropSettings, new AbortController().signal);
+
+      // 3. Scan for Pre-cut Questions (Handling Flat "FileName_QID.jpg" structure)
+      // Filter identifying potential question images (ignore full_pages folder)
+      const potentialImageKeys = Object.keys(loadedZip.files).filter(k => 
+         !loadedZip.files[k].dir && 
+         /\.(jpg|jpeg|png)$/i.test(k) &&
+         !k.includes('full_pages/')
+      );
+
+      if (potentialImageKeys.length > 0) {
+        setDetailedStatus(`发现 ${potentialImageKeys.length} 个潜在图片文件，正在加载...`);
+        const loadedQuestions: QuestionImage[] = [];
+
+        await Promise.all(potentialImageKeys.map(async (key) => {
+             // Try to parse filename patterns
+             // Pattern 1: Flat -> "2001全国理_Q1.jpg"
+             // Pattern 2: Nested -> "questions/2001全国理/Q1.jpg" or "questions/Q1.jpg"
+             
+             const pathParts = key.split('/');
+             const fileNameWithExt = pathParts[pathParts.length - 1];
+             
+             let qFileName = "unknown";
+             let qId = "0";
+             let matched = false;
+
+             // Regex for Flat: "FileName_QID.jpg"
+             // Capture group 1: FileName, Capture group 2: ID
+             const flatMatch = fileNameWithExt.match(/^(.+)_Q(\d+(?:_\d+)?)\.(jpg|jpeg|png)$/i);
+             
+             if (flatMatch) {
+                qFileName = flatMatch[1];
+                qId = flatMatch[2];
+                matched = true;
+             } else {
+                // Regex for Nested: just "QID.jpg" inside some folder structure
+                const nestedMatch = fileNameWithExt.match(/^Q(\d+(?:_\d+)?)\.(jpg|jpeg|png)$/i);
+                if (nestedMatch) {
+                    qId = nestedMatch[1];
+                    // Attempt to deduce filename from folder structure or fallback
+                    if (pathParts.length >= 2) {
+                       // Assume parent folder is filename if not "questions"
+                       const parent = pathParts[pathParts.length - 2];
+                       if (parent.toLowerCase() !== 'questions') {
+                          qFileName = parent;
+                       } else if (loadedRawPages.length > 0) {
+                          // Best guess if directly inside "questions/"
+                          qFileName = loadedRawPages[0].fileName; 
+                       }
+                    }
+                    matched = true;
+                }
+             }
+
+             if (matched) {
+                 const base64 = await loadedZip.file(key)!.async('base64');
+                 
+                 // Look up metadata (PageNumber) from the loaded JSON
+                 const targetPage = loadedRawPages.find(p => 
+                   (p.fileName === qFileName && p.detections.some(d => d.id === qId)) ||
+                   p.detections.some(d => d.id === qId) // Fallback: loose ID match
+                 );
+
+                 loadedQuestions.push({
+                   id: qId,
+                   pageNumber: targetPage?.pageNumber || 0,
+                   fileName: qFileName === "unknown" && targetPage ? targetPage.fileName : qFileName,
+                   dataUrl: `data:image/jpeg;base64,${base64}`
+                 });
+             }
+        }));
+
+        if (loadedQuestions.length > 0) {
+            // Sort Questions
+            loadedQuestions.sort((a, b) => {
+               if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
+               if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+               const na = parseFloat(a.id);
+               const nb = parseFloat(b.id);
+               if (!isNaN(na) && !isNaN(nb)) return na - nb;
+               return a.id.localeCompare(b.id);
+            });
+
+            setQuestions(loadedQuestions);
+            setCompletedCount(loadedRawPages.length);
+            setStatus(ProcessingStatus.COMPLETED);
+            setShowDebug(false);
+        } else {
+             // Found images but regex didn't match? Fallback to crop
+             console.warn("Found images but regex failed to parse question IDs. Re-cropping.");
+             setDetailedStatus('无法识别图片文件名格式，正在重新裁剪...');
+             await runCroppingPhase(loadedRawPages, cropSettings, new AbortController().signal);
+        }
+      } else {
+        // Fallback: If no pre-cut images found, re-run cropping on client
+        setDetailedStatus('未找到预处理图片，正在使用数据重新裁剪...');
+        await runCroppingPhase(loadedRawPages, cropSettings, new AbortController().signal);
+      }
+      
     } catch (err: any) {
-      setError(err.message || "ZIP 加载失败。");
+      setError("ZIP 加载失败: " + err.message);
       setStatus(ProcessingStatus.ERROR);
     }
   };
@@ -467,10 +580,16 @@ const App: React.FC = () => {
             </div>
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-8 items-end">
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">裁剪内缩 (Raw Crop)</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Raw Expansion (X/Y)</label>
                 <div className="flex items-center gap-2">
-                  <input type="number" value={cropSettings.cropPadding} onChange={(e) => setCropSettings(prev => ({ ...prev, cropPadding: Number(e.target.value) }))} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" />
-                  <span className="text-xs text-slate-400 font-bold">px</span>
+                  <div className="relative flex-1">
+                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">X</span>
+                     <input type="number" value={cropSettings.cropPaddingX} onChange={(e) => setCropSettings(prev => ({ ...prev, cropPaddingX: Number(e.target.value) }))} className="w-full pl-6 pr-2 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-center" />
+                  </div>
+                  <div className="relative flex-1">
+                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">Y</span>
+                     <input type="number" value={cropSettings.cropPaddingY} onChange={(e) => setCropSettings(prev => ({ ...prev, cropPaddingY: Number(e.target.value) }))} className="w-full pl-6 pr-2 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 text-center" />
+                  </div>
                 </div>
               </div>
               <div className="space-y-2">

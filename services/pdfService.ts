@@ -1,12 +1,13 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
-import { getTrimmedBounds, isContained } from '../shared/canvas-utils.js';
+import { trimWhitespace, isContained } from '../shared/canvas-utils.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
 
 export interface CropSettings {
-  cropPadding: number; // Raw crop buffer
+  cropPaddingX: number; // Raw crop buffer X (Horizontal)
+  cropPaddingY: number; // Raw crop buffer Y (Vertical) - Keep small to avoid line overlaps
   canvasPaddingLeft: number; // Final aesthetic padding
   canvasPaddingRight: number;
   canvasPaddingY: number;
@@ -112,18 +113,19 @@ export const constructQuestionCanvas = (
 
     const img = new Image();
     img.onload = async () => {
-      // 1. Initial Raw Crop Settings
-      const CROP_PADDING = settings.cropPadding; 
+      // 1. Initial Raw Crop Settings - Split X/Y
+      const PAD_X = settings.cropPaddingX;
+      const PAD_Y = settings.cropPaddingY;
       
       // 2. Process each fragment (Crop -> Trim)
       const processedFragments = finalBoxes.map((box, idx) => {
         const [ymin, xmin, ymax, xmax] = box;
         
         // Calculate raw crop coordinates
-        const x = Math.max(0, (xmin / 1000) * originalWidth - CROP_PADDING);
-        const y = Math.max(0, (ymin / 1000) * originalHeight - CROP_PADDING);
-        const rawW = ((xmax - xmin) / 1000) * originalWidth + (CROP_PADDING * 2);
-        const rawH = ((ymax - ymin) / 1000) * originalHeight + (CROP_PADDING * 2);
+        const x = Math.max(0, (xmin / 1000) * originalWidth - PAD_X);
+        const y = Math.max(0, (ymin / 1000) * originalHeight - PAD_Y);
+        const rawW = ((xmax - xmin) / 1000) * originalWidth + (PAD_X * 2);
+        const rawH = ((ymax - ymin) / 1000) * originalHeight + (PAD_Y * 2);
         const w = Math.min(originalWidth - x, rawW);
         const h = Math.min(originalHeight - y, rawH);
 
@@ -135,8 +137,8 @@ export const constructQuestionCanvas = (
 
         if (onStatus) onStatus(`Refining ${idx + 1}/${finalBoxes.length}...`);
         
-        // EDGE PEEL: Trim white space from this fragment
-        const trim = getTrimmedBounds(tempCtx, Math.floor(w), Math.floor(h), onStatus);
+        // EDGE TRIM: Trim white space from this fragment
+        const trim = trimWhitespace(tempCtx, Math.floor(w), Math.floor(h));
 
         return {
           sourceCanvas: tempCanvas,
@@ -254,12 +256,18 @@ export const analyzeCanvasContent = (canvas: HTMLCanvasElement | OffscreenCanvas
     const { context } = createSmartCanvas(w, h);
     context.drawImage(canvas as any, 0, 0);
     
-    return getTrimmedBounds(context, w, h);
+    // Use trimWhitespace to find the bounding box of non-white pixels
+    return trimWhitespace(context, w, h);
 };
 
 /**
  * PHASE 3: Align and Export
  * Draws the content (defined by trimBounds) into a new canvas of (targetContentWidth + padding).
+ * 
+ * Logic:
+ * 1. Create canvas of width = targetContentWidth + LeftPad + RightPad
+ * 2. Draw image at x = LeftPad.
+ * 3. If targetContentWidth > trimBounds.w, the extra space effectively becomes Right Padding.
  */
 export const generateAlignedImage = async (
     sourceCanvas: HTMLCanvasElement | OffscreenCanvas, 
