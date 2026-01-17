@@ -11,6 +11,15 @@ import { detectQuestionsOnPage } from './services/geminiService';
 
 const CONCURRENCY_LIMIT = 5; 
 
+// Default settings since we removed the UI controls
+const DEFAULT_CROP_SETTINGS: CropSettings = {
+  cropPadding: 25,
+  canvasPaddingLeft: 10,
+  canvasPaddingRight: 10,
+  canvasPaddingY: 10,
+  mergeOverlap: 20
+};
+
 interface SourcePage {
   dataUrl: string;
   width: number;
@@ -39,17 +48,7 @@ const App: React.FC = () => {
   const [croppingDone, setCroppingDone] = useState(0);
 
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3-flash-preview');
-  const [cropSettings, setCropSettings] = useState<CropSettings>({
-    cropPadding: 25,
-    canvasPaddingLeft: 10,
-    canvasPaddingRight: 10,
-    canvasPaddingY: 10,
-    mergeOverlap: 20
-  });
   
-  const [isReprocessing, setIsReprocessing] = useState(false);
-  // Fix: Use ReturnType<typeof setTimeout> instead of NodeJS.Timeout to avoid namespace error
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // 初始化检查 URL query param
@@ -108,63 +107,12 @@ const App: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (rawPages.length === 0 || status === ProcessingStatus.LOADING_PDF || status === ProcessingStatus.DETECTING_QUESTIONS || status === ProcessingStatus.CROPPING) {
-      return;
+  const normalizeBoxes = (boxes2d: any): [number, number, number, number][] => {
+    // Check if the first element is an array (nested) or a number (flat)
+    if (Array.isArray(boxes2d[0])) {
+      return boxes2d as [number, number, number, number][];
     }
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    setIsReprocessing(true);
-    debounceTimer.current = setTimeout(async () => {
-      await reprocessAllCrops();
-      setIsReprocessing(false);
-    }, 500); 
-    return () => {
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    };
-  }, [cropSettings]); 
-
-  const reprocessAllCrops = async () => {
-    if (rawPages.length === 0) return;
-    const updatedQuestions: QuestionImage[] = [];
-    
-    for (let i = 0; i < rawPages.length; i++) {
-      const page = rawPages[i];
-      
-      for (const detection of page.detections) {
-        const { final, original } = await cropAndStitchImage(
-          page.dataUrl, 
-          [detection.boxes_2d], 
-          page.width, 
-          page.height, 
-          cropSettings
-        );
-        
-        if (final) {
-          if (detection.id === 'continuation' && updatedQuestions.length > 0) {
-            const lastQ = updatedQuestions[updatedQuestions.length - 1];
-            const stitchedImg = await mergeBase64Images(lastQ.dataUrl, final, -cropSettings.mergeOverlap);
-            lastQ.dataUrl = stitchedImg;
-          } else {
-            updatedQuestions.push({
-              id: detection.id,
-              pageNumber: page.pageNumber,
-              dataUrl: final,
-              originalDataUrl: original
-            });
-          }
-        }
-      }
-    }
-    setQuestions(updatedQuestions);
-  };
-
-  const handleReprocess = async () => {
-    if (rawPages.length === 0) return;
-    setIsReprocessing(true);
-    // Give UI a chance to render the spinner
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await reprocessAllCrops();
-    setIsReprocessing(false);
+    return [boxes2d] as [number, number, number, number][];
   };
 
   // Extract core AI logic to be reusable for "Re-identify"
@@ -233,18 +181,21 @@ const App: React.FC = () => {
 
         for (const detection of page.detections) {
           if (signal.aborted) return;
+          
+          const boxes = normalizeBoxes(detection.boxes_2d);
+
           const { final, original } = await cropAndStitchImage(
             page.dataUrl, 
-            [detection.boxes_2d], 
+            boxes, 
             page.width, 
             page.height,
-            cropSettings
+            DEFAULT_CROP_SETTINGS
           );
           
           if (final) {
             if (detection.id === 'continuation' && allExtractedQuestions.length > 0) {
               const lastQ = allExtractedQuestions[allExtractedQuestions.length - 1];
-              const stitchedImg = await mergeBase64Images(lastQ.dataUrl, final, -cropSettings.mergeOverlap);
+              const stitchedImg = await mergeBase64Images(lastQ.dataUrl, final, -DEFAULT_CROP_SETTINGS.mergeOverlap);
               lastQ.dataUrl = stitchedImg;
             } else {
               allExtractedQuestions.push({
@@ -493,16 +444,6 @@ const App: React.FC = () => {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                   重新识别
                 </button>
-
-                <button 
-                  onClick={handleReprocess}
-                  disabled={isReprocessing}
-                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-1.5 border-l border-slate-100 ml-1 pl-3 disabled:opacity-50"
-                  title="使用现有的检测数据重新执行切割算法 (Debug)"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm0-5.758a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z" /></svg>
-                  重新切割
-                </button>
              </div>
 
             <button
@@ -577,67 +518,12 @@ const App: React.FC = () => {
         ) : (
           questions.length > 0 && (
             <div className="relative">
-              {isReprocessing && (
-                 <div className="absolute inset-0 z-50 bg-white/50 backdrop-blur-[1px] flex items-start justify-center pt-20">
-                    <div className="bg-black/80 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 animate-bounce">
-                       <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                       <span className="font-bold">更新参数中...</span>
-                    </div>
-                 </div>
-              )}
               <QuestionGrid questions={questions} sourceFileName={uploadedFileName} rawPages={rawPages} />
             </div>
           )
         )}
       </main>
       
-      {!showDebug && questions.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-md border-t border-slate-200 shadow-2xl">
-          <div className="max-w-7xl mx-auto px-4 py-5">
-             <div className="flex flex-col xl:flex-row items-center gap-8 justify-between">
-                <div className="flex items-center gap-4 min-w-[180px]">
-                   <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
-                     <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
-                   </div>
-                   <div>
-                     <h3 className="text-base font-bold text-slate-800">微调参数</h3>
-                     <p className="text-[10px] text-slate-400 font-medium">调整切割边缘效果</p>
-                   </div>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-x-10 gap-y-3 flex-grow w-full">
-                    <div className="flex flex-col gap-1.5">
-                       <div className="flex justify-between items-center"><label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">检测扩展</label><span className="text-xs font-mono text-blue-600 font-bold">{cropSettings.cropPadding}px</span></div>
-                       <input type="range" min="0" max="100" value={cropSettings.cropPadding} onChange={(e) => setCropSettings(p => ({...p, cropPadding: parseInt(e.target.value)}))} className="h-2 accent-blue-600 cursor-pointer"/>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                       <div className="flex justify-between items-center"><label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">上下留白</label><span className="text-xs font-mono text-blue-600 font-bold">{cropSettings.canvasPaddingY}px</span></div>
-                       <input type="range" min="0" max="100" value={cropSettings.canvasPaddingY} onChange={(e) => setCropSettings(p => ({...p, canvasPaddingY: parseInt(e.target.value)}))} className="h-2 accent-blue-600 cursor-pointer"/>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                       <div className="flex justify-between items-center"><label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">跨页重叠</label><span className="text-xs font-mono text-blue-600 font-bold">{cropSettings.mergeOverlap}px</span></div>
-                       <input type="range" min="0" max="100" value={cropSettings.mergeOverlap} onChange={(e) => setCropSettings(p => ({...p, mergeOverlap: parseInt(e.target.value)}))} className="h-2 accent-blue-600 cursor-pointer"/>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                       <div className="flex justify-between items-center"><label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">左侧边距</label><span className="text-xs font-mono text-blue-600 font-bold">{cropSettings.canvasPaddingLeft}px</span></div>
-                       <input type="range" min="0" max="100" value={cropSettings.canvasPaddingLeft} onChange={(e) => setCropSettings(p => ({...p, canvasPaddingLeft: parseInt(e.target.value)}))} className="h-2 accent-blue-600 cursor-pointer"/>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                       <div className="flex justify-between items-center"><label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">右侧边距</label><span className="text-xs font-mono text-blue-600 font-bold">{cropSettings.canvasPaddingRight}px</span></div>
-                       <input type="range" min="0" max="100" value={cropSettings.canvasPaddingRight} onChange={(e) => setCropSettings(p => ({...p, canvasPaddingRight: parseInt(e.target.value)}))} className="h-2 accent-blue-600 cursor-pointer"/>
-                    </div>
-                </div>
-                <button 
-                  onClick={() => setCropSettings({ cropPadding: 25, canvasPaddingLeft: 10, canvasPaddingRight: 10, canvasPaddingY: 10, mergeOverlap: 20 })} 
-                  className="p-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-red-500 transition-colors border border-slate-200"
-                  title="重置"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                </button>
-             </div>
-          </div>
-        </div>
-      )}
-
       <footer className="mt-20 text-center text-slate-400 text-sm py-10 border-t border-slate-100">
         <p>© 2024 AI 试卷助手</p>
       </footer>

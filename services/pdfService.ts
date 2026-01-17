@@ -17,19 +17,26 @@ export interface CropSettings {
  * 助手函数：创建一个 Canvas，如果支持则优先使用 OffscreenCanvas
  */
 const createSmartCanvas = (width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas, context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } => {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const safeHeight = Math.max(1, Math.floor(height));
+
   if (typeof OffscreenCanvas !== 'undefined') {
-    const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error("OffscreenCanvas context failed");
-    return { canvas, context: context as OffscreenCanvasRenderingContext2D };
-  } else {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error("Canvas context failed");
-    return { canvas, context };
-  }
+    try {
+      const canvas = new OffscreenCanvas(safeWidth, safeHeight);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error("OffscreenCanvas context failed");
+      return { canvas, context: context as OffscreenCanvasRenderingContext2D };
+    } catch (e) {
+      // Fallback to DOM canvas if OffscreenCanvas fails (e.g. invalid size or OOM)
+    }
+  } 
+  
+  const canvas = document.createElement('canvas');
+  canvas.width = safeWidth;
+  canvas.height = safeHeight;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error("Canvas context failed");
+  return { canvas, context };
 };
 
 export const renderPageToImage = async (page: any, scale: number = 3): Promise<{ dataUrl: string, width: number, height: number }> => {
@@ -247,6 +254,9 @@ export const cropAndStitchImage = (
         const w = Math.min(originalWidth - x, rawW);
         const h = Math.min(originalHeight - y, rawH);
 
+        // Safety check: skip invalid or empty dimensions to prevent OffscreenCanvas constructor errors
+        if (w < 1 || h < 1) return null;
+
         const { canvas: tempCanvas, context: tempCtx } = createSmartCanvas(Math.floor(w), Math.floor(h));
         tempCtx.drawImage(img, x, y, w, h, 0, 0, w, h);
 
@@ -258,18 +268,18 @@ export const cropAndStitchImage = (
           trim: trim,
           absInkX: x + trim.x 
         };
-      }).filter(Boolean);
+      }).filter((item) => item !== null);
 
       if (processedFragments.length === 0) {
         resolve({ final: '' });
         return;
       }
 
-      const minAbsInkX = Math.min(...processedFragments.map(f => f.absInkX));
-      const maxRightEdge = Math.max(...processedFragments.map(f => (f.absInkX - minAbsInkX) + f.trim.w));
+      const minAbsInkX = Math.min(...processedFragments.map(f => f!.absInkX));
+      const maxRightEdge = Math.max(...processedFragments.map(f => (f!.absInkX - minAbsInkX) + f!.trim.w));
       const finalWidth = maxRightEdge + CANVAS_PADDING_LEFT + CANVAS_PADDING_RIGHT;
       const fragmentGap = 10; 
-      const totalContentHeight = processedFragments.reduce((acc, f) => acc + f.trim.h, 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1)));
+      const totalContentHeight = processedFragments.reduce((acc, f) => acc + f!.trim.h, 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1)));
       const finalHeight = totalContentHeight + (CANVAS_PADDING_Y * 2);
 
       const { canvas, context: ctx } = createSmartCanvas(finalWidth, finalHeight);
@@ -278,6 +288,7 @@ export const cropAndStitchImage = (
 
       let currentY = CANVAS_PADDING_Y;
       processedFragments.forEach((f) => {
+        if (!f) return;
         const relativeOffset = f.absInkX - minAbsInkX;
         const offsetX = CANVAS_PADDING_LEFT + relativeOffset;
         ctx.drawImage(
@@ -301,14 +312,14 @@ export const cropAndStitchImage = (
       }
 
       const wasTrimmed = processedFragments.some(f => 
-        f.trim.w < (f.sourceCanvas as any).width || f.trim.h < (f.sourceCanvas as any).height
+        f && (f.trim.w < (f.sourceCanvas as any).width || f.trim.h < (f.sourceCanvas as any).height)
       );
 
       let originalDataUrl: string | undefined;
       if (wasTrimmed) {
-         const maxRawWidth = Math.max(...processedFragments.map(f => (f.sourceCanvas as any).width));
+         const maxRawWidth = Math.max(...processedFragments.map(f => f ? (f.sourceCanvas as any).width : 0));
          const finalRawWidth = maxRawWidth + CANVAS_PADDING_LEFT + CANVAS_PADDING_RIGHT;
-         const totalRawHeight = processedFragments.reduce((acc, f) => acc + (f.sourceCanvas as any).height, 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1)));
+         const totalRawHeight = processedFragments.reduce((acc, f) => acc + (f ? (f.sourceCanvas as any).height : 0), 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1)));
          const finalRawHeight = totalRawHeight + (CANVAS_PADDING_Y * 2);
 
          const { canvas: rawCanvas, context: rawCtx } = createSmartCanvas(finalRawWidth, finalRawHeight);
@@ -317,8 +328,10 @@ export const cropAndStitchImage = (
          
          let currentRawY = CANVAS_PADDING_Y;
          processedFragments.forEach(f => {
-             rawCtx.drawImage(f.sourceCanvas as any, CANVAS_PADDING_LEFT, currentRawY);
-             currentRawY += (f.sourceCanvas as any).height + fragmentGap;
+             if (f) {
+                rawCtx.drawImage(f.sourceCanvas as any, CANVAS_PADDING_LEFT, currentRawY);
+                currentRawY += (f.sourceCanvas as any).height + fragmentGap;
+             }
          });
 
          if ('toDataURL' in rawCanvas) {

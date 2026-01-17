@@ -51,15 +51,18 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
       img.src = page.dataUrl;
       await new Promise((resolve) => { img.onload = resolve; });
 
-      // boxes_2d is now a single box [ymin, xmin, ymax, xmax]
-      const box = detection.boxes_2d;
-      // Convert normalized 0-1000 to pixels
-      const x = Math.floor((box[1] / 1000) * page.width);
-      const y = Math.floor((box[0] / 1000) * page.height);
-      const w = Math.floor(((box[3] - box[1]) / 1000) * page.width);
-      const h = Math.floor(((box[2] - box[0]) / 1000) * page.height);
-      
-      const fragments = [{ x, y, w, h }];
+      // Handle both single and multiple boxes
+      const rawBoxes = (Array.isArray(detection.boxes_2d[0]) 
+        ? detection.boxes_2d 
+        : [detection.boxes_2d]) as [number, number, number, number][];
+
+      const fragments = rawBoxes.map(box => {
+        const x = Math.floor((box[1] / 1000) * page.width);
+        const y = Math.floor((box[0] / 1000) * page.height);
+        const w = Math.floor(((box[3] - box[1]) / 1000) * page.width);
+        const h = Math.floor(((box[2] - box[0]) / 1000) * page.height);
+        return { x, y, w, h };
+      });
 
       const totalHeight = fragments.reduce((acc, f) => acc + f.h, 0);
       const maxWidth = Math.max(...fragments.map(f => f.w));
@@ -68,14 +71,17 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
 
       const canvas = document.createElement('canvas');
       canvas.width = maxWidth;
-      canvas.height = totalHeight;
+      canvas.height = totalHeight + (fragments.length > 1 ? (fragments.length - 1) * 10 : 0); // Add slight gap for multi-box
       const ctx = canvas.getContext('2d');
 
       if (ctx) {
+        ctx.fillStyle = '#eee';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
         let currentY = 0;
         fragments.forEach(f => {
           ctx.drawImage(img, f.x, f.y, f.w, f.h, 0, currentY, f.w, f.h);
-          currentY += f.h;
+          currentY += f.h + 10;
         });
         setPreviewUrl(canvas.toDataURL('image/jpeg', 1.0));
       }
@@ -144,6 +150,11 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
                       // Find index in flattened list for click handler
                       const globalIndex = allItems.findIndex(item => item.pageIndex === pageIdx && item.detection.id === det.id);
                       
+                      // Normalize boxes for rendering
+                      const boxes = (Array.isArray(det.boxes_2d[0]) 
+                        ? det.boxes_2d 
+                        : [det.boxes_2d]) as [number, number, number, number][];
+                      
                       return (
                         <g 
                           key={det.id} 
@@ -153,22 +164,25 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
                             setSelectedIndex(globalIndex);
                           }}
                         >
-                          <rect
-                            x={det.boxes_2d[1]} // xmin
-                            y={det.boxes_2d[0]} // ymin
-                            width={det.boxes_2d[3] - det.boxes_2d[1]} // xmax - xmin
-                            height={det.boxes_2d[2] - det.boxes_2d[0]} // ymax - ymin
-                            fill="rgba(255, 50, 50, 0.1)"
-                            stroke="red"
-                            strokeWidth="2"
-                            vectorEffect="non-scaling-stroke"
-                            className="group-hover:fill-[rgba(255,50,50,0.3)] group-hover:stroke-[4px] transition-all duration-75"
-                          />
+                          {boxes.map((box, bIdx) => (
+                            <rect
+                              key={bIdx}
+                              x={box[1]} // xmin
+                              y={box[0]} // ymin
+                              width={box[3] - box[1]} // xmax - xmin
+                              height={box[2] - box[0]} // ymax - ymin
+                              fill="rgba(255, 50, 50, 0.1)"
+                              stroke="red"
+                              strokeWidth="2"
+                              vectorEffect="non-scaling-stroke"
+                              className="group-hover:fill-[rgba(255,50,50,0.3)] group-hover:stroke-[4px] transition-all duration-75"
+                            />
+                          ))}
                           
-                          {/* ID Label - Top Right inside the box */}
+                          {/* ID Label - Top Right inside the first box */}
                           <text
-                            x={det.boxes_2d[3] - 10}
-                            y={det.boxes_2d[0] + 35}
+                            x={boxes[0][3] - 10}
+                            y={boxes[0][0] + 35}
                             fill="#991b1b" // Deep Red (red-800)
                             fontSize="40"
                             fontWeight="900"
@@ -197,6 +211,9 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
               {page.detections.map((det) => {
                 const globalIndex = allItems.findIndex(item => item.pageIndex === pageIdx && item.detection.id === det.id);
                 const isSelected = selectedIndex === globalIndex;
+                const boxes = (Array.isArray(det.boxes_2d[0]) ? det.boxes_2d : [det.boxes_2d]) as [number, number, number, number][];
+                const isMulti = boxes.length > 1;
+
                 return (
                   <button
                     key={det.id}
@@ -212,12 +229,18 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
                         Q{det.id}
                       </div>
                       <div className="text-[10px] font-mono text-slate-600">
-                         Single box
+                         {isMulti ? `${boxes.length} boxes (stitched)` : 'Single box'}
                       </div>
                     </div>
                     <div className="text-right">
-                       <span className="text-[10px] font-mono text-slate-500 block">y:{Math.round(det.boxes_2d[0])}</span>
-                       <span className="text-[10px] font-mono text-slate-500 block">x:{Math.round(det.boxes_2d[1])}</span>
+                       {isMulti ? (
+                         <span className="text-[10px] font-mono text-slate-500 block">Mixed</span>
+                       ) : (
+                         <>
+                           <span className="text-[10px] font-mono text-slate-500 block">y:{Math.round(boxes[0][0])}</span>
+                           <span className="text-[10px] font-mono text-slate-500 block">x:{Math.round(boxes[0][1])}</span>
+                         </>
+                       )}
                     </div>
                   </button>
                 );
@@ -282,7 +305,7 @@ export const DebugRawView: React.FC<Props> = ({ pages }) => {
              <div className="bg-yellow-50 px-6 py-3 text-xs text-yellow-800 border-t border-yellow-100 flex justify-between items-center">
                <span>⚠️ Displaying exact coordinates (0px padding, No cleaning).</span>
                <span className="font-mono text-yellow-900/50 hidden sm:inline">
-                  {`[${Math.round(allItems[selectedIndex].detection.boxes_2d[0])},${Math.round(allItems[selectedIndex].detection.boxes_2d[1])}]`}
+                   {(Array.isArray(allItems[selectedIndex].detection.boxes_2d[0])) ? "Nested Box Structure" : `[${Math.round(allItems[selectedIndex].detection.boxes_2d[0] as number)},${Math.round(allItems[selectedIndex].detection.boxes_2d[1] as number)}]`}
                </span>
              </div>
           </div>
