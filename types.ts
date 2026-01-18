@@ -39,18 +39,11 @@ export interface ProcessedCanvas {
   originalDataUrl?: string;
 }
 
-export enum JobStatus {
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED'
-}
-
 export interface HistoryMetadata {
   id: string;
   name: string;
   timestamp: number;
   pageCount: number;
-  status?: JobStatus;
-  totalExpectedPages?: number;
 }
 
 export enum ProcessingStatus {
@@ -59,6 +52,5 @@ export enum ProcessingStatus {
   DETECTING_QUESTIONS = 'DETECTING_QUESTIONS',
   CROPPING = 'CROPPING',
   COMPLETED = 'COMPLETED',
-  ERROR = 'ERROR',
-  STOPPED = 'STOPPED'
+  ERROR = 'ERROR'
 }
