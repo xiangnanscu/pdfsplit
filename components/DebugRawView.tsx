@@ -1,6 +1,7 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DebugPageData, QuestionImage } from '../types';
+import { constructQuestionCanvas, CropSettings } from '../services/pdfService';
 
 interface Props {
   pages: DebugPageData[];
@@ -8,10 +9,22 @@ interface Props {
   onClose: () => void;
 }
 
+// Default settings for debug visualization
+const DEBUG_CROP_SETTINGS: CropSettings = {
+  cropPadding: 20, // Standard padding to see context
+  canvasPaddingLeft: 0,
+  canvasPaddingRight: 0,
+  canvasPaddingY: 0,
+  mergeOverlap: 0
+};
+
 export const DebugRawView: React.FC<Props> = ({ pages, questions, onClose }) => {
   // Key format: "fileName||pageNumber||detIndex"
-  // Using index ensures uniqueness even if IDs (like 'continuation') are repeated on a page
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  
+  // State for dynamically generated raw view (for ZIP loaded data)
+  const [dynamicRawUrl, setDynamicRawUrl] = useState<string | null>(null);
+  const [isGeneratingRaw, setIsGeneratingRaw] = useState(false);
 
   const { selectedImage, selectedDetection } = useMemo(() => {
     if (!selectedKey) return { selectedImage: null, selectedDetection: null };
@@ -31,10 +44,8 @@ export const DebugRawView: React.FC<Props> = ({ pages, questions, onClose }) => 
     const detection = detectionRaw ? { ...detectionRaw, pageNumber: pageNum, fileName } : null;
 
     // 2. Resolve the effective Question ID to find the extracted image
-    // This handles 'continuation' boxes by mapping them to the preceding Question ID
     let effectiveId: string | null = null;
     
-    // Sort pages to ensure correct sequence
     const filePages = pages.filter(p => p.fileName === fileName).sort((a,b) => a.pageNumber - b.pageNumber);
     
     let found = false;
@@ -44,7 +55,6 @@ export const DebugRawView: React.FC<Props> = ({ pages, questions, onClose }) => 
             if (d.id !== 'continuation') {
                 effectiveId = d.id;
             }
-            // Check if this is the selected box
             if (p.pageNumber === pageNum && i === detIdx) {
                 found = true;
                 break;
@@ -57,6 +67,62 @@ export const DebugRawView: React.FC<Props> = ({ pages, questions, onClose }) => 
 
     return { selectedImage: image, selectedDetection: detection };
   }, [selectedKey, pages, questions]);
+
+  // Effect: Dynamically generate the raw crop if it's missing from the stored image
+  useEffect(() => {
+    // Reset state when selection changes
+    setDynamicRawUrl(null);
+    setIsGeneratingRaw(false);
+
+    if (!selectedDetection || !selectedKey) return;
+
+    // If we already have the originalDataUrl in the processed image, use it (no need to regenerate)
+    if (selectedImage?.originalDataUrl) return;
+
+    const generateRawView = async () => {
+      setIsGeneratingRaw(true);
+      try {
+        const parts = selectedKey.split('||');
+        const fileName = parts[0];
+        const pageNum = parseInt(parts[1], 10);
+        
+        const page = pages.find(p => p.fileName === fileName && p.pageNumber === pageNum);
+        
+        if (page) {
+          // Normalize boxes to array format for the service
+          let boxes = selectedDetection.boxes_2d;
+          // Ensure it's treated as an array of boxes even if it's a single box array (though types say it is)
+          if (!Array.isArray(boxes[0])) {
+             // @ts-ignore
+             boxes = [boxes];
+          }
+
+          // Use the construct service to stitch/crop the raw area
+          const result = await constructQuestionCanvas(
+            page.dataUrl,
+            boxes as [number, number, number, number][],
+            page.width,
+            page.height,
+            DEBUG_CROP_SETTINGS
+          );
+
+          if (result.originalDataUrl) {
+            setDynamicRawUrl(result.originalDataUrl);
+          }
+        }
+      } catch (e) {
+        console.error("Error generating debug view:", e);
+      } finally {
+        setIsGeneratingRaw(false);
+      }
+    };
+
+    generateRawView();
+
+  }, [selectedDetection, selectedKey, pages, selectedImage]);
+
+  // Determine which URL to show for the Raw View
+  const displayRawUrl = selectedImage?.originalDataUrl || dynamicRawUrl;
 
   if (pages.length === 0) return null;
 
@@ -177,7 +243,7 @@ export const DebugRawView: React.FC<Props> = ({ pages, questions, onClose }) => 
 
           <div className="flex-1 overflow-y-auto p-8">
             {selectedKey ? (
-              <div className="space-y-10 animate-[fade-in_0.3s_ease-out]">
+              <div className="space-y-12 animate-[fade-in_0.3s_ease-out]">
                   {/* Header Info */}
                   <div>
                     <div className="flex justify-between items-start mb-2">
@@ -191,81 +257,128 @@ export const DebugRawView: React.FC<Props> = ({ pages, questions, onClose }) => 
                     <p className="text-slate-500 text-sm font-medium break-all">{selectedDetection?.fileName}</p>
                   </div>
 
-                  {/* Preview Image Card */}
-                  <div className="bg-slate-950 rounded-3xl border border-slate-800 p-6 shadow-inner relative group">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-t-3xl opacity-50"></div>
-                    {selectedImage ? (
-                        <div className="flex items-center justify-center min-h-[300px] bg-white/5 rounded-2xl overflow-hidden relative cursor-zoom-in">
-                          {/* Checkerboard background for transparency illusion */}
-                          <div className="absolute inset-0 opacity-20" 
-                              style={{backgroundImage: 'radial-gradient(#475569 1px, transparent 1px)', backgroundSize: '10px 10px'}}></div>
-                          
-                          <img 
-                            src={selectedImage.dataUrl} 
-                            alt="Extracted Result" 
-                            className="relative max-w-full h-auto object-contain shadow-2xl"
-                          />
-                        </div>
-                    ) : (
-                        <div className="h-64 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-2xl">
-                          <svg className="w-12 h-12 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                          <span className="text-xs font-bold uppercase tracking-widest">Image not generated yet</span>
-                          <span className="text-[10px] text-slate-500 mt-2">Check processing status</span>
-                        </div>
-                    )}
-                    <div className="mt-6 flex justify-between items-center">
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                          {selectedImage ? `ID: ${selectedImage.id}` : 'Result Preview'}
-                        </span>
-                        {selectedImage && (
-                            <a 
-                              href={selectedImage.dataUrl} 
-                              download={`${selectedImage.fileName}_Q${selectedImage.id}.jpg`}
-                              className="text-blue-400 hover:text-blue-300 text-xs font-bold flex items-center gap-2 transition-colors bg-blue-500/10 px-4 py-2 rounded-lg"
-                            >
-                              Download <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                            </a>
+                  {/* Comparison Section */}
+                  <div className="grid grid-cols-1 gap-10">
+                    
+                    {/* 1. Final Processed Result */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                         <h4 className="text-green-400 font-bold text-xs uppercase tracking-widest flex items-center gap-2">
+                           <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                           Final Processed Output
+                         </h4>
+                         {selectedImage && (
+                            <span className="text-slate-600 text-[10px] font-mono">
+                               {(selectedImage as any).width || '?'} x {(selectedImage as any).height || '?'} px
+                            </span>
+                         )}
+                      </div>
+
+                      <div className="bg-slate-950 rounded-3xl border border-green-900/30 p-6 shadow-2xl relative group overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-emerald-600 rounded-t-3xl opacity-50"></div>
+                        {selectedImage ? (
+                            <div className="flex items-center justify-center min-h-[160px] bg-white rounded-xl overflow-hidden relative cursor-zoom-in">
+                              <div className="absolute inset-0 opacity-10" 
+                                  style={{backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '10px 10px'}}></div>
+                              
+                              <img 
+                                src={selectedImage.dataUrl} 
+                                alt="Final Result" 
+                                className="relative max-w-full h-auto object-contain"
+                              />
+                            </div>
+                        ) : (
+                           <div className="h-40 flex flex-col items-center justify-center text-slate-600">
+                             <span className="text-xs font-bold uppercase tracking-widest">Processing...</span>
+                           </div>
                         )}
+                        <div className="mt-4 flex justify-end">
+                            {selectedImage && (
+                                <a 
+                                  href={selectedImage.dataUrl} 
+                                  download={`${selectedImage.fileName}_Q${selectedImage.id}.jpg`}
+                                  className="text-green-400 hover:text-green-300 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 transition-colors bg-green-500/10 px-3 py-1.5 rounded-lg border border-green-500/20"
+                                >
+                                  Download Final
+                                </a>
+                            )}
+                        </div>
+                      </div>
                     </div>
+
+                    {/* 2. Raw Gemini Detection */}
+                    <div className="space-y-3">
+                       <h4 className="text-blue-400 font-bold text-xs uppercase tracking-widest flex items-center gap-2">
+                          <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                          Raw Gemini Detection (No Trim)
+                       </h4>
+
+                       <div className="bg-slate-950 rounded-3xl border border-blue-900/30 p-6 shadow-2xl relative group overflow-hidden">
+                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-t-3xl opacity-50"></div>
+                         
+                         {displayRawUrl ? (
+                             <div className="flex items-center justify-center min-h-[160px] bg-white rounded-xl overflow-hidden relative cursor-zoom-in">
+                               <div className="absolute inset-0 opacity-10" 
+                                   style={{backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '10px 10px'}}></div>
+                               
+                               <img 
+                                 src={displayRawUrl} 
+                                 alt="Raw Gemini Crop" 
+                                 className="relative max-w-full h-auto object-contain"
+                               />
+                             </div>
+                         ) : (
+                            <div className="h-40 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/50">
+                               {isGeneratingRaw ? (
+                                   <div className="flex flex-col items-center gap-2">
+                                       <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                       <span className="text-xs font-bold uppercase tracking-widest text-blue-400">Generating Preview...</span>
+                                   </div>
+                               ) : (
+                                   <span className="text-xs font-bold uppercase tracking-widest opacity-50">Raw view unavailable</span>
+                               )}
+                            </div>
+                         )}
+
+                         <div className="mt-4 flex justify-between items-center">
+                            <span className="text-[10px] text-slate-500 font-medium">
+                               Matches red box on left exactly
+                            </span>
+                         </div>
+                       </div>
+                    </div>
+
                   </div>
 
                   {/* Technical Data */}
-                  <div className="space-y-4">
-                    <h4 className="text-slate-400 font-bold text-xs uppercase tracking-widest border-b border-slate-800 pb-2">Coordinates (0-1000)</h4>
+                  <div className="space-y-4 pt-6 border-t border-slate-800">
+                    <h4 className="text-slate-500 font-bold text-xs uppercase tracking-widest">Bounding Box Coordinates</h4>
                     <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800">
-                          <span className="block text-[10px] text-slate-500 uppercase font-black mb-1">Y-Min (Top)</span>
-                          <span className="text-white font-mono text-lg">
+                        <div className="bg-slate-800/30 p-3 rounded-lg border border-slate-800">
+                          <span className="block text-[9px] text-slate-500 uppercase font-black mb-1">Y-Min</span>
+                          <span className="text-white font-mono text-sm">
                               {selectedDetection ? Math.round((Array.isArray(selectedDetection.boxes_2d[0]) ? selectedDetection.boxes_2d[0][0] : selectedDetection.boxes_2d[0]) as number) : '-'}
                           </span>
                         </div>
-                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800">
-                          <span className="block text-[10px] text-slate-500 uppercase font-black mb-1">X-Min (Left)</span>
-                          <span className="text-white font-mono text-lg">
+                        <div className="bg-slate-800/30 p-3 rounded-lg border border-slate-800">
+                          <span className="block text-[9px] text-slate-500 uppercase font-black mb-1">X-Min</span>
+                          <span className="text-white font-mono text-sm">
                               {selectedDetection ? Math.round((Array.isArray(selectedDetection.boxes_2d[0]) ? selectedDetection.boxes_2d[0][1] : selectedDetection.boxes_2d[1]) as number) : '-'}
                           </span>
                         </div>
-                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800">
-                          <span className="block text-[10px] text-slate-500 uppercase font-black mb-1">Y-Max (Bottom)</span>
-                          <span className="text-white font-mono text-lg">
+                        <div className="bg-slate-800/30 p-3 rounded-lg border border-slate-800">
+                          <span className="block text-[9px] text-slate-500 uppercase font-black mb-1">Y-Max</span>
+                          <span className="text-white font-mono text-sm">
                               {selectedDetection ? Math.round((Array.isArray(selectedDetection.boxes_2d[0]) ? selectedDetection.boxes_2d[0][2] : selectedDetection.boxes_2d[2]) as number) : '-'}
                           </span>
                         </div>
-                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800">
-                          <span className="block text-[10px] text-slate-500 uppercase font-black mb-1">X-Max (Right)</span>
-                          <span className="text-white font-mono text-lg">
+                        <div className="bg-slate-800/30 p-3 rounded-lg border border-slate-800">
+                          <span className="block text-[9px] text-slate-500 uppercase font-black mb-1">X-Max</span>
+                          <span className="text-white font-mono text-sm">
                               {selectedDetection ? Math.round((Array.isArray(selectedDetection.boxes_2d[0]) ? selectedDetection.boxes_2d[0][3] : selectedDetection.boxes_2d[3]) as number) : '-'}
                           </span>
                         </div>
                     </div>
-                    
-                    {/* Box Count Indicator */}
-                    {(selectedDetection?.boxes_2d as any[])?.length > 1 && (
-                        <div className="bg-amber-500/10 text-amber-500 px-5 py-4 rounded-xl border border-amber-500/20 text-sm font-bold flex items-center gap-3">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                            Multi-box Detected (Automatic Stitching)
-                        </div>
-                    )}
                   </div>
               </div>
             ) : (
@@ -274,7 +387,7 @@ export const DebugRawView: React.FC<Props> = ({ pages, questions, onClose }) => 
                       <svg className="w-12 h-12 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
                   </div>
                   <h3 className="text-slate-200 font-bold text-xl mb-3">No Selection</h3>
-                  <p className="text-slate-500 text-base max-w-[240px]">Click any bounding box on the left to inspect details and view the cropped result.</p>
+                  <p className="text-slate-500 text-base max-w-[240px]">Click any bounding box on the left to inspect details and compare raw vs processed output.</p>
               </div>
             )}
           </div>

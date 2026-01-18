@@ -180,39 +180,35 @@ export const constructQuestionCanvas = (
       });
 
       // 5. Generate Original for debug/comparison
+      // ALWAYS generate this to allow the user to see "Raw Gemini Box" vs "Processed Result"
       let originalDataUrl: string | undefined;
-      const wasTrimmed = processedFragments.some(f => 
-        f && (f.trim.w < f.rawW * 0.9 || f.trim.h < f.rawH * 0.9)
-      );
+      
+      // Re-stitch raw fragments without trim for comparison
+      const maxRawWidth = Math.max(...processedFragments.map(f => f ? (f.sourceCanvas as any).width : 0));
+      const finalRawWidth = maxRawWidth + 20;
+      const finalRawHeight = processedFragments.reduce((acc, f) => acc + (f ? (f.sourceCanvas as any).height : 0), 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1))) + 20;
 
-      if (wasTrimmed) {
-         // Re-stitch raw fragments without trim for comparison
-         const maxRawWidth = Math.max(...processedFragments.map(f => f ? (f.sourceCanvas as any).width : 0));
-         const finalRawWidth = maxRawWidth + 20;
-         const finalRawHeight = processedFragments.reduce((acc, f) => acc + (f ? (f.sourceCanvas as any).height : 0), 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1))) + 20;
-
-         const { canvas: rawCanvas, context: rawCtx } = createSmartCanvas(finalRawWidth, finalRawHeight);
-         rawCtx.fillStyle = '#ffffff';
-         rawCtx.fillRect(0, 0, finalRawWidth, finalRawHeight);
-         
-         let currentRawY = 10;
-         processedFragments.forEach(f => {
-             if (f) {
-                rawCtx.drawImage(f.sourceCanvas as any, 10, currentRawY);
-                currentRawY += (f.sourceCanvas as any).height + fragmentGap;
-             }
-         });
-         
-         if ('toDataURL' in rawCanvas) {
-             originalDataUrl = (rawCanvas as HTMLCanvasElement).toDataURL('image/jpeg', 0.8);
-         } else {
-             const blob = await (rawCanvas as OffscreenCanvas).convertToBlob({ type: 'image/jpeg', quality: 0.8 });
-             originalDataUrl = await new Promise(r => {
-                 const reader = new FileReader();
-                 reader.onloadend = () => r(reader.result as string);
-                 reader.readAsDataURL(blob);
-             });
-         }
+      const { canvas: rawCanvas, context: rawCtx } = createSmartCanvas(finalRawWidth, finalRawHeight);
+      rawCtx.fillStyle = '#ffffff';
+      rawCtx.fillRect(0, 0, finalRawWidth, finalRawHeight);
+      
+      let currentRawY = 10;
+      processedFragments.forEach(f => {
+          if (f) {
+            rawCtx.drawImage(f.sourceCanvas as any, 10, currentRawY);
+            currentRawY += (f.sourceCanvas as any).height + fragmentGap;
+          }
+      });
+      
+      if ('toDataURL' in rawCanvas) {
+          originalDataUrl = (rawCanvas as HTMLCanvasElement).toDataURL('image/jpeg', 0.8);
+      } else {
+          const blob = await (rawCanvas as OffscreenCanvas).convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+          originalDataUrl = await new Promise(r => {
+              const reader = new FileReader();
+              reader.onloadend = () => r(reader.result as string);
+              reader.readAsDataURL(blob);
+          });
       }
 
       resolve({ canvas, width: maxContentWidth, height: totalContentHeight, originalDataUrl });
@@ -222,9 +218,43 @@ export const constructQuestionCanvas = (
 };
 
 /**
+ * Scan ONLY vertical bounds (Top and Bottom) to trim vertical whitespace.
+ * Preserves X-axis/horizontal whitespace completely.
+ */
+const scanVerticalBounds = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: number, h: number) => {
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+    // Aggressive threshold matching other utilities (242)
+    const threshold = 242;
+
+    const isRowEmpty = (y: number) => {
+        for(let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            // Check pixel darkness and alpha
+            if (data[i+3] > 10 && (data[i] < threshold || data[i+1] < threshold || data[i+2] < threshold)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let top = 0;
+    let bottom = h;
+
+    while(top < h && isRowEmpty(top)) top++;
+    while(bottom > top && isRowEmpty(bottom - 1)) bottom--;
+
+    return { y: top, h: Math.max(0, bottom - top) };
+};
+
+/**
  * Merge two canvases vertically (for continuation).
- * Aligned with backend mergeBase64Images: trim whitespace from both canvases first,
- * then merge only the trimmed content areas.
+ * 
+ * OPTIMIZED STRATEGY: 
+ * We ONLY trim vertical whitespace (top/bottom) to remove gaps between merged parts.
+ * We DO NOT trim horizontal whitespace. This ensures that right-aligned content (like geometry figures 
+ * in a continuation block) maintains its relative position if the input canvas captured the layout correctly.
+ * 
  * @param gap - Gap between trimmed contents. Use negative value for overlap.
  */
 export const mergeCanvasesVertical = (
@@ -232,36 +262,42 @@ export const mergeCanvasesVertical = (
   bottomCanvas: HTMLCanvasElement | OffscreenCanvas,
   gap: number = 0
 ): { canvas: HTMLCanvasElement | OffscreenCanvas, width: number, height: number } => {
-    // Trim whitespace from top canvas
+    // 1. Prepare contexts to read data
     const { context: topCtx } = createSmartCanvas(topCanvas.width, topCanvas.height);
     topCtx.drawImage(topCanvas as any, 0, 0);
-    const topBounds = trimWhitespace(topCtx, topCanvas.width, topCanvas.height);
 
-    // Trim whitespace from bottom canvas
     const { context: bottomCtx } = createSmartCanvas(bottomCanvas.width, bottomCanvas.height);
     bottomCtx.drawImage(bottomCanvas as any, 0, 0);
-    const bottomBounds = trimWhitespace(bottomCtx, bottomCanvas.width, bottomCanvas.height);
 
-    // Calculate final dimensions using trimmed bounds
-    const width = Math.max(topBounds.w, bottomBounds.w);
-    const height = Math.max(0, topBounds.h + bottomBounds.h + gap);
+    // 2. Get Vertical Bounds ONLY (preserve horizontal layout)
+    const topV = scanVerticalBounds(topCtx as any, topCanvas.width, topCanvas.height);
+    const bottomV = scanVerticalBounds(bottomCtx as any, bottomCanvas.width, bottomCanvas.height);
+
+    // 3. Calculate final dimensions
+    // Width is determined by the widest element (preserving full width of inputs)
+    const width = Math.max(topCanvas.width, bottomCanvas.width);
+    const height = Math.max(0, topV.h + bottomV.h + gap);
 
     const { canvas, context: ctx } = createSmartCanvas(width, height);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // Draw trimmed top image (left-aligned)
+    // 4. Draw Trimmed Content
+    // We draw using the full width of the source, but only the vertical slice of content.
+    // X is drawn at 0 to maintain original alignment relative to the box capture.
+    
+    // Draw Top
     ctx.drawImage(
       topCanvas as any,
-      topBounds.x, topBounds.y, topBounds.w, topBounds.h,
-      0, 0, topBounds.w, topBounds.h
+      0, topV.y, topCanvas.width, topV.h,  // Source: Full Width, Vert Slice
+      0, 0, topCanvas.width, topV.h        // Dest: 0, 0
     );
 
-    // Draw trimmed bottom image starting after the top image plus the gap (left-aligned)
+    // Draw Bottom
     ctx.drawImage(
       bottomCanvas as any,
-      bottomBounds.x, bottomBounds.y, bottomBounds.w, bottomBounds.h,
-      0, topBounds.h + gap, bottomBounds.w, bottomBounds.h
+      0, bottomV.y, bottomCanvas.width, bottomV.h, // Source: Full Width, Vert Slice
+      0, topV.h + gap, bottomCanvas.width, bottomV.h // Dest: 0, after top
     );
 
     return { canvas, width, height };
