@@ -5,7 +5,7 @@ import { QuestionImage, DebugPageData } from '../types';
 
 interface Props {
   questions: QuestionImage[];
-  rawPages: DebugPageData[]; // Data required for exporting full pages and JSON
+  rawPages: DebugPageData[];
 }
 
 export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
@@ -13,7 +13,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
   const [selectedImage, setSelectedImage] = useState<QuestionImage | null>(null);
   const [showOriginal, setShowOriginal] = useState(false); 
 
-  // Group questions by fileName for display
   const groupedQuestions = useMemo(() => {
     const groups: Record<string, QuestionImage[]> = {};
     questions.forEach(q => {
@@ -25,7 +24,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
     return groups;
   }, [questions]);
 
-  // Handle keyboard navigation
   const handleNext = useCallback(() => {
     if (!selectedImage) return;
     const currentIndex = questions.indexOf(selectedImage);
@@ -65,49 +63,30 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
       const fileNames = Object.keys(groupedQuestions);
       const isBatch = fileNames.length > 1;
 
-      // Iterate through each source file
       fileNames.forEach((fileName) => {
-        // Filter data for this specific file
         const fileQs = groupedQuestions[fileName];
         const fileRawPages = rawPages.filter(p => p.fileName === fileName);
-        
-        // Determine the root folder for this file in the ZIP
-        // If batch: Root/FileName/...
-        // If single: Root/...
         const folder = isBatch ? zip.folder(fileName) : zip;
-        
         if (!folder) return;
 
-        // 1. Add Analysis JSON
         folder.file("analysis_data.json", JSON.stringify(fileRawPages, null, 2));
-
-        // 2. Add Full Pages Folder
         const fullPagesFolder = folder.folder("full_pages");
         fileRawPages.forEach((page) => {
           const base64Data = page.dataUrl.split(',')[1];
           fullPagesFolder?.file(`Page_${page.pageNumber}.jpg`, base64Data, { base64: true });
         });
 
-        // 3. Add Question Images (Flat in the folder)
         const usedNames = new Set<string>();
-
         fileQs.forEach((q) => {
           const base64Data = q.dataUrl.split(',')[1];
-          
-          // Desired format: FileName_QID.jpg
           let finalName = `${q.fileName}_Q${q.id}.jpg`;
-          
-          // Handle potential duplicate IDs (though rare with correct logic)
           if (usedNames.has(finalName)) {
              let counter = 1;
              const baseName = `${q.fileName}_Q${q.id}`;
-             while(usedNames.has(`${baseName}_${counter}.jpg`)) {
-                 counter++;
-             }
+             while(usedNames.has(`${baseName}_${counter}.jpg`)) counter++;
              finalName = `${baseName}_${counter}.jpg`;
           }
           usedNames.add(finalName);
-
           folder.file(finalName, base64Data, { base64: true });
         });
       });
@@ -121,20 +100,15 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
-      
-      // Filename logic
-      const downloadName = isBatch 
-        ? "math_exam_batch_processed.zip" 
-        : `${fileNames[0]}_processed.zip`;
-        
+      const downloadName = isBatch ? "exam_batch_processed.zip" : `${fileNames[0]}_processed.zip`;
       link.download = downloadName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("Error creating ZIP:", err);
-      alert("An error occurred while creating the ZIP file. Please try downloading images individually.");
+      console.error("ZIP Error:", err);
+      alert("Error creating ZIP. Try individual downloads.");
     } finally {
       setIsZipping(false);
     }
@@ -148,22 +122,22 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
 
   return (
     <>
-      <div className="mt-8 w-full animate-[fade-in_0.6s_ease-out]">
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6 border-b border-slate-200 pb-8">
+      <div className="mt-12 w-full animate-[fade-in_0.6s_ease-out]">
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-8 border-b border-slate-200 pb-10">
           <div>
-            <h2 className="text-3xl font-extrabold text-slate-900 mb-2">处理结果</h2>
-            <p className="text-slate-500 font-medium flex items-center gap-2">
-              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-              共提取 {questions.length} 道题目，来自 {Object.keys(groupedQuestions).length} 个文件
+            <h2 className="text-4xl font-black text-slate-900 mb-3 tracking-tight">Results</h2>
+            <p className="text-slate-500 font-semibold flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
+              Extracted {questions.length} questions from {Object.keys(groupedQuestions).length} source files
             </p>
           </div>
           <button 
             onClick={downloadAllAsZip}
             disabled={isZipping}
-            className={`group px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 shadow-xl shadow-blue-100 min-w-[220px] ${
+            className={`group px-10 py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-3 shadow-2xl min-w-[240px] tracking-tight uppercase text-xs ${
               isZipping 
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
-                : 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95'
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none' 
+                : 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95 shadow-blue-200'
             }`}
           >
             {isZipping ? (
@@ -172,54 +146,55 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                打包下载中...
+                Zipping...
               </>
             ) : (
               <>
-                <svg className="w-6 h-6 group-hover:bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                <svg className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-                下载全部 (ZIP)
+                Download All (ZIP)
               </>
             )}
           </button>
         </div>
 
-        {/* Iterate over file groups to display them with sections */}
         {Object.entries(groupedQuestions).map(([fileName, fileQuestions]: [string, QuestionImage[]]) => (
-            <div key={fileName} className="mb-12">
-                <div className="flex items-center gap-3 mb-6 px-2">
-                    <div className="bg-blue-100 text-blue-700 p-2 rounded-lg">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            <div key={fileName} className="mb-16">
+                <div className="flex items-center gap-4 mb-8 px-2">
+                    <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl border border-blue-100">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                     </div>
-                    <h3 className="text-xl font-bold text-slate-800">{fileName}</h3>
-                    <span className="text-sm font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{fileQuestions.length} 题</span>
+                    <div>
+                      <h3 className="text-2xl font-black text-slate-800 tracking-tight">{fileName}</h3>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{fileQuestions.length} Items Found</p>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8">
                 {fileQuestions.map((q, idx) => (
                     <div 
                     key={`${q.fileName}-${q.pageNumber}-${q.id}-${idx}`} 
-                    className="group bg-white border border-slate-200 rounded-3xl overflow-hidden hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 flex flex-col"
+                    className="group bg-white border border-slate-200 rounded-[2rem] overflow-hidden hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 flex flex-col shadow-xl shadow-slate-200/40"
                     >
-                    <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                        <span className="text-xs font-black uppercase tracking-widest text-slate-400">P{q.pageNumber} • Q{q.id}</span>
+                    <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">P{q.pageNumber} • Q{q.id}</span>
                         <div className="flex gap-2">
                         {q.originalDataUrl && (
-                            <span className="text-[10px] px-2 py-0.5 bg-orange-100 text-orange-600 rounded-full font-bold border border-orange-200" title="Pixels were removed by edge peeling">
-                            已微调
+                            <span className="text-[9px] px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg font-black uppercase tracking-widest border border-blue-100">
+                            Refined
                             </span>
                         )}
                         </div>
                     </div>
                     <div 
-                        className="p-8 flex items-center justify-center flex-grow bg-white min-h-[240px] cursor-zoom-in relative"
+                        className="p-8 flex items-center justify-center flex-grow bg-white min-h-[260px] cursor-zoom-in relative"
                         onClick={() => setSelectedImage(q)}
                     >
                         <img 
                         src={q.dataUrl} 
                         alt={`Question ${q.id}`} 
-                        className="max-w-full h-auto rounded-lg select-none shadow-sm transition-transform group-hover:scale-[1.02]"
+                        className="max-w-full h-auto rounded-lg select-none transition-transform duration-500 group-hover:scale-[1.03]"
                         />
                     </div>
                     </div>
@@ -229,64 +204,61 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
         ))}
       </div>
 
-      {/* Lightbox / Modal */}
       {selectedImage && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm transition-opacity animate-[fade-in_0.2s_ease-out]"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-md transition-opacity animate-[fade-in_0.2s_ease-out]"
           onClick={() => setSelectedImage(null)}
         >
-          {/* Navigation Buttons */}
           {hasPrev && (
             <button
-              className="absolute left-4 top-1/2 -translate-y-1/2 p-4 text-white/50 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
+              className="absolute left-6 top-1/2 -translate-y-1/2 p-5 text-white/40 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
               onClick={(e) => {
                 e.stopPropagation();
                 handlePrev();
               }}
             >
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
           )}
 
           {hasNext && (
             <button
-              className="absolute right-4 top-1/2 -translate-y-1/2 p-4 text-white/50 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
+              className="absolute right-6 top-1/2 -translate-y-1/2 p-5 text-white/40 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
               onClick={(e) => {
                 e.stopPropagation();
                 handleNext();
               }}
             >
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
               </svg>
             </button>
           )}
 
-          <div className="relative max-w-7xl w-full h-[95vh] flex flex-col items-center justify-center p-4 md:px-12 md:py-8" onClick={(e) => e.stopPropagation()}>
-            <div className="w-full flex justify-between items-center text-white mb-4">
+          <div className="relative max-w-7xl w-full h-[95vh] flex flex-col items-center justify-center p-6 md:px-16 md:py-10" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full flex justify-between items-center text-white mb-6">
                <div className="flex flex-col">
-                 <h2 className="text-2xl font-bold">Question {selectedImage.id}</h2>
-                 <p className="text-sm text-white/50">{selectedImage.fileName}</p>
+                 <h2 className="text-3xl font-black tracking-tight">Question {selectedImage.id}</h2>
+                 <p className="text-xs font-bold text-white/40 uppercase tracking-[0.2em]">{selectedImage.fileName}</p>
                </div>
-               <div className="flex gap-4">
+               <div className="flex gap-6">
                   <button 
-                    className="text-white/50 hover:text-white p-2 transition-colors"
+                    className="text-white/40 hover:text-white p-3 transition-colors bg-white/5 rounded-2xl hover:bg-white/10"
                     onClick={() => setSelectedImage(null)}
                   >
                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                </div>
             </div>
             
-            <div className="flex-1 w-full bg-white rounded-xl overflow-hidden shadow-2xl relative flex flex-col">
-              <div className="relative w-full h-full bg-slate-100 flex items-center justify-center p-8">
-                {/* Compare Button Overlay */}
+            <div className="flex-1 w-full bg-white rounded-3xl overflow-hidden shadow-2xl relative flex flex-col">
+              <div className="relative w-full h-full bg-slate-50 flex items-center justify-center p-12 overflow-auto">
                 {selectedImage.originalDataUrl && (
-                  <div className="absolute top-4 left-4 z-20">
+                  <div className="absolute top-6 left-6 z-20">
                     <button 
                       onMouseDown={() => setShowOriginal(true)}
                       onMouseUp={() => setShowOriginal(false)}
@@ -294,14 +266,14 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
                       onTouchStart={() => setShowOriginal(true)}
                       onTouchEnd={() => setShowOriginal(false)}
                       className={`
-                        px-4 py-2 rounded-full font-bold shadow-lg transition-all border-2
+                        px-6 py-3 rounded-2xl font-black shadow-2xl transition-all border-2 uppercase text-[10px] tracking-widest
                         ${showOriginal 
-                          ? 'bg-orange-500 text-white border-orange-600 scale-105' 
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                          ? 'bg-blue-600 text-white border-blue-700 scale-105' 
+                          : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-50'
                         }
                       `}
                     >
-                      {showOriginal ? '显示原始裁剪' : '长按对比原图'}
+                      {showOriginal ? 'Showing Original' : 'Hold to Compare'}
                     </button>
                   </div>
                 )}
@@ -309,20 +281,20 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages }) => {
                 <img 
                   src={showOriginal && selectedImage.originalDataUrl ? selectedImage.originalDataUrl : selectedImage.dataUrl} 
                   alt={`Full size Question ${selectedImage.id}`} 
-                  className={`max-h-full max-w-full object-contain shadow-lg transition-all duration-150 ${showOriginal ? 'ring-4 ring-orange-500' : ''}`}
+                  className={`max-h-full max-w-full object-contain shadow-2xl transition-all duration-300 ${showOriginal ? 'ring-8 ring-blue-500/20' : ''}`}
                 />
               </div>
             </div>
             
-            <div className="mt-6 flex items-center justify-between w-full max-w-4xl">
-              <span className="text-white/60 text-sm">Use arrow keys to navigate</span>
+            <div className="mt-8 flex items-center justify-between w-full max-w-5xl">
+              <span className="text-white/30 text-[10px] font-black uppercase tracking-[0.3em]">Arrows to navigate • Esc to close</span>
               <a 
                  href={selectedImage.dataUrl} 
                  download={`${selectedImage.fileName}_Q${selectedImage.id}.jpg`}
-                 className="bg-white text-black px-6 py-2 rounded-full font-bold hover:bg-slate-200 transition-colors flex items-center gap-2"
+                 className="bg-white text-slate-950 px-8 py-3.5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all flex items-center gap-3 active:scale-95 shadow-2xl shadow-white/5"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
                 Download Image
               </a>

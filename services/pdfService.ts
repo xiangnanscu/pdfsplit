@@ -1,13 +1,12 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
-import { trimWhitespace, isContained } from '../shared/canvas-utils.js';
+import { getTrimmedBounds, trimWhitespace, isContained } from '../shared/canvas-utils.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
 
 export interface CropSettings {
-  cropPaddingX: number; // Raw crop buffer X (Horizontal)
-  cropPaddingY: number; // Raw crop buffer Y (Vertical) - Keep small to avoid line overlaps
+  cropPadding: number; // Raw crop buffer (unified for X and Y)
   canvasPaddingLeft: number; // Final aesthetic padding
   canvasPaddingRight: number;
   canvasPaddingY: number;
@@ -113,19 +112,18 @@ export const constructQuestionCanvas = (
 
     const img = new Image();
     img.onload = async () => {
-      // 1. Initial Raw Crop Settings - Split X/Y
-      const PAD_X = settings.cropPaddingX;
-      const PAD_Y = settings.cropPaddingY;
-      
+      // Use unified crop padding (aligned with backend)
+      const CROP_PADDING = settings.cropPadding;
+
       // 2. Process each fragment (Crop -> Trim)
       const processedFragments = finalBoxes.map((box, idx) => {
         const [ymin, xmin, ymax, xmax] = box;
-        
+
         // Calculate raw crop coordinates
-        const x = Math.max(0, (xmin / 1000) * originalWidth - PAD_X);
-        const y = Math.max(0, (ymin / 1000) * originalHeight - PAD_Y);
-        const rawW = ((xmax - xmin) / 1000) * originalWidth + (PAD_X * 2);
-        const rawH = ((ymax - ymin) / 1000) * originalHeight + (PAD_Y * 2);
+        const x = Math.max(0, (xmin / 1000) * originalWidth - CROP_PADDING);
+        const y = Math.max(0, (ymin / 1000) * originalHeight - CROP_PADDING);
+        const rawW = ((xmax - xmin) / 1000) * originalWidth + (CROP_PADDING * 2);
+        const rawH = ((ymax - ymin) / 1000) * originalHeight + (CROP_PADDING * 2);
         const w = Math.min(originalWidth - x, rawW);
         const h = Math.min(originalHeight - y, rawH);
 
@@ -136,9 +134,9 @@ export const constructQuestionCanvas = (
         tempCtx.drawImage(img, x, y, w, h, 0, 0, w, h);
 
         if (onStatus) onStatus(`Refining ${idx + 1}/${finalBoxes.length}...`);
-        
-        // EDGE TRIM: Trim white space from this fragment
-        const trim = trimWhitespace(tempCtx, Math.floor(w), Math.floor(h));
+
+        // EDGE TRIM: Use getTrimmedBounds for edge peel algorithm (aligned with backend)
+        const trim = getTrimmedBounds(tempCtx, Math.floor(w), Math.floor(h));
 
         return {
           sourceCanvas: tempCanvas,
@@ -158,8 +156,8 @@ export const constructQuestionCanvas = (
       const minAbsInkX = Math.min(...processedFragments.map(f => f!.absInkX));
       // Max width required to hold fragments relative to leftmost ink
       const maxContentWidth = Math.max(...processedFragments.map(f => (f!.absInkX - minAbsInkX) + f!.trim.w));
-      
-      const fragmentGap = 5; 
+
+      const fragmentGap = 10; // Aligned with backend 
       const totalContentHeight = processedFragments.reduce((acc, f) => acc + f!.trim.h, 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1)));
 
       // Canvas size is exactly the content size (no padding yet)
@@ -225,21 +223,47 @@ export const constructQuestionCanvas = (
 
 /**
  * Merge two canvases vertically (for continuation).
- * Returns a new Canvas.
+ * Aligned with backend mergeBase64Images: trim whitespace from both canvases first,
+ * then merge only the trimmed content areas.
+ * @param gap - Gap between trimmed contents. Use negative value for overlap.
  */
-export const mergeCanvasesVertical = (topCanvas: HTMLCanvasElement | OffscreenCanvas, bottomCanvas: HTMLCanvasElement | OffscreenCanvas, overlap: number = 0): { canvas: HTMLCanvasElement | OffscreenCanvas, width: number, height: number } => {
-    const width = Math.max(topCanvas.width, bottomCanvas.width);
-    const height = Math.max(0, topCanvas.height + bottomCanvas.height - overlap);
-    
+export const mergeCanvasesVertical = (
+  topCanvas: HTMLCanvasElement | OffscreenCanvas,
+  bottomCanvas: HTMLCanvasElement | OffscreenCanvas,
+  gap: number = 0
+): { canvas: HTMLCanvasElement | OffscreenCanvas, width: number, height: number } => {
+    // Trim whitespace from top canvas
+    const { context: topCtx } = createSmartCanvas(topCanvas.width, topCanvas.height);
+    topCtx.drawImage(topCanvas as any, 0, 0);
+    const topBounds = trimWhitespace(topCtx, topCanvas.width, topCanvas.height);
+
+    // Trim whitespace from bottom canvas
+    const { context: bottomCtx } = createSmartCanvas(bottomCanvas.width, bottomCanvas.height);
+    bottomCtx.drawImage(bottomCanvas as any, 0, 0);
+    const bottomBounds = trimWhitespace(bottomCtx, bottomCanvas.width, bottomCanvas.height);
+
+    // Calculate final dimensions using trimmed bounds
+    const width = Math.max(topBounds.w, bottomBounds.w);
+    const height = Math.max(0, topBounds.h + bottomBounds.h + gap);
+
     const { canvas, context: ctx } = createSmartCanvas(width, height);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
-    
-    // Draw top
-    ctx.drawImage(topCanvas as any, 0, 0);
-    // Draw bottom
-    ctx.drawImage(bottomCanvas as any, 0, topCanvas.height - overlap);
-    
+
+    // Draw trimmed top image (left-aligned)
+    ctx.drawImage(
+      topCanvas as any,
+      topBounds.x, topBounds.y, topBounds.w, topBounds.h,
+      0, 0, topBounds.w, topBounds.h
+    );
+
+    // Draw trimmed bottom image starting after the top image plus the gap (left-aligned)
+    ctx.drawImage(
+      bottomCanvas as any,
+      bottomBounds.x, bottomBounds.y, bottomBounds.w, bottomBounds.h,
+      0, topBounds.h + gap, bottomBounds.w, bottomBounds.h
+    );
+
     return { canvas, width, height };
 };
 

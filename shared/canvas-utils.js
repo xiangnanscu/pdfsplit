@@ -1,17 +1,76 @@
 
 /**
- * Shared Canvas Logic
+ * Shared Canvas Logic for "Edge Peel" algorithm.
  * Works in both Browser (DOM Canvas) and Node.js (node-canvas).
  */
 
 /**
- * Scans the canvas content to find the bounding box of the ink/content.
- * (Trims surrounding whitespace)
- * 
- * @param {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} ctx 
- * @param {number} width 
- * @param {number} height 
- * @returns {{x: number, y: number, w: number, h: number}}
+ * Intelligent "Edge Peel" Trimming.
+ * Peels off artifacts (like black lines) from the edges until clean whitespace is found.
+ */
+export const getTrimmedBounds = (ctx, width, height, onStatus = null) => {
+  const w = Math.floor(width);
+  const h = Math.floor(height);
+  if (w <= 0 || h <= 0) return { x: 0, y: 0, w: 0, h: 0 };
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  // Threshold for "ink" vs "paper". 200 is fairly safe for black text.
+  const threshold = 220; 
+
+  const rowHasInk = (y) => {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      // Check for non-white pixels (low RGB values) or significant alpha
+      if (data[i + 3] > 10 && (data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const colHasInk = (x) => {
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + x) * 4;
+      if (data[i + 3] > 10 && (data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // We only peel from the edges, not deep into the image.
+  const SAFETY_Y = Math.floor(h * 0.15); // Reduce safety to be more aggressive
+  const SAFETY_X = Math.floor(w * 0.15);
+
+  let top = 0;
+  let bottom = h;
+  let left = 0;
+  let right = w;
+
+  if (onStatus) onStatus("Peeling Top...");
+  while (top < SAFETY_Y && rowHasInk(top)) { top++; }
+
+  if (onStatus) onStatus("Peeling Bottom...");
+  while (bottom > h - SAFETY_Y && bottom > top && rowHasInk(bottom - 1)) { bottom--; }
+
+  if (onStatus) onStatus("Peeling Left...");
+  while (left < SAFETY_X && colHasInk(left)) { left++; }
+
+  if (onStatus) onStatus("Peeling Right...");
+  while (right > w - SAFETY_X && right > left && colHasInk(right - 1)) { right--; }
+
+  return {
+    x: left,
+    y: top,
+    w: Math.max(0, right - left),
+    h: Math.max(0, bottom - top)
+  };
+};
+
+/**
+ * Trim whitespace from all sides of an image until non-white pixels are found.
+ * Returns the bounding box of the content.
  */
 export const trimWhitespace = (ctx, width, height) => {
   const w = Math.floor(width);
@@ -20,74 +79,53 @@ export const trimWhitespace = (ctx, width, height) => {
 
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
-  const threshold = 240; // Pixels lighter than this are considered "white/empty"
+  
+  // Adjusted threshold: math papers often have grayish backgrounds.
+  // 240 is more aggressive than 250.
+  const threshold = 242; 
 
-  let top = 0;
-  let bottom = h - 1;
-  let left = 0;
-  let right = w - 1;
+  const isInkPixel = (x, y) => {
+    const i = (y * w + x) * 4;
+    // Transparent or pure white is paper
+    if (data[i + 3] < 10) return false;
+    // If any channel is below threshold, it's ink
+    return data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold;
+  };
 
-  // Helper: Check if a row has any "ink" (non-white pixels)
   const rowHasInk = (y) => {
     for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      // Check if pixel is NOT white (R,G,B < threshold) and has opacity
-      if (data[i+3] > 0 && (data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold)) {
-        return true;
-      }
+      if (isInkPixel(x, y)) return true;
     }
     return false;
   };
 
-  // Helper: Check if a column has any "ink"
-  const colHasInk = (x, yStart, yEnd) => {
-    for (let y = yStart; y <= yEnd; y++) {
-      const i = (y * w + x) * 4;
-      if (data[i+3] > 0 && (data[i] < threshold || data[i + 1] < threshold || data[i + 2] < threshold)) {
-        return true;
-      }
+  const colHasInk = (x) => {
+    for (let y = 0; y < h; y++) {
+      if (isInkPixel(x, y)) return true;
     }
     return false;
   };
 
-  // Scan Top
-  while (top < h && !rowHasInk(top)) {
-    top++;
-  }
+  let top = 0;
+  let bottom = h;
+  let left = 0;
+  let right = w;
 
-  // If top reached h, the image is empty
-  if (top === h) return { x: 0, y: 0, w: w, h: h }; 
-
-  // Scan Bottom
-  while (bottom > top && !rowHasInk(bottom)) {
-    bottom--;
-  }
-
-  // Scan Left
-  while (left < w && !colHasInk(left, top, bottom)) {
-    left++;
-  }
-
-  // Scan Right
-  while (right > left && !colHasInk(right, top, bottom)) {
-    right--;
-  }
+  while (top < h && !rowHasInk(top)) { top++; }
+  while (bottom > top && !rowHasInk(bottom - 1)) { bottom--; }
+  while (left < w && !colHasInk(left)) { left++; }
+  while (right > left && !colHasInk(right - 1)) { right--; }
 
   return {
     x: left,
     y: top,
-    w: Math.max(1, right - left + 1),
-    h: Math.max(1, bottom - top + 1)
+    w: Math.max(0, right - left),
+    h: Math.max(0, bottom - top)
   };
 };
 
 /**
  * Checks if box A is contained within or equal to box B.
- * Box format: [ymin, xmin, ymax, xmax] (0-1000)
- * 
- * @param {number[]} a 
- * @param {number[]} b 
- * @returns {boolean}
  */
 export const isContained = (a, b) => {
   const [yminA, xminA, ymaxA, xmaxA] = a;
