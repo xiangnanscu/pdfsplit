@@ -457,8 +457,7 @@ const App: React.FC = () => {
             {rawPages.length > 0 && (
               <button
                 onClick={() => setShowSettingsPanel(!showSettingsPanel)}
-                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-sm border ${showSettingsPanel ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-              >
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-sm border ${showSettingsPanel ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
                 Refine
               </button>
@@ -548,7 +547,7 @@ const App: React.FC = () => {
         )}
 
         <ProcessingState status={status} progress={progress} total={total} completedCount={completedCount} error={error} detailedStatus={detailedStatus} croppingTotal={croppingTotal} croppingDone={croppingDone} />
-        {showDebug ? <DebugRawView pages={rawPages} /> : (questions.length > 0 && <QuestionGrid questions={questions} rawPages={rawPages} />)}
+        {showDebug ? <DebugRawView pages={rawPages} questions={questions} /> : (questions.length > 0 && <QuestionGrid questions={questions} rawPages={rawPages} />)}
       </main>
       
       {/* Refinement Panel - Moved to Top Right Floating Dialog */}
