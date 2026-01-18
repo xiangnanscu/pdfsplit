@@ -69,7 +69,7 @@ const App: React.FC = () => {
     return localStorage.getItem(STORAGE_KEYS.MODEL) || 'gemini-3-flash-preview';
   });
 
-  const [showSettingsPanel, setShowSettingsPanel] = useState(true);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
   // Progress States
   const [progress, setProgress] = useState(0); 
@@ -440,7 +440,7 @@ const App: React.FC = () => {
   const showInitialUI = status === ProcessingStatus.IDLE || (status === ProcessingStatus.ERROR && sourcePages.length === 0);
 
   return (
-    <div className={`min-h-screen px-4 md:px-8 bg-slate-50 relative transition-all duration-300 ${rawPages.length > 0 && showSettingsPanel ? 'pb-72' : 'pb-32'}`}>
+    <div className={`min-h-screen px-4 md:px-8 bg-slate-50 relative transition-all duration-300 pb-32`}>
       <header className="max-w-6xl mx-auto py-10 text-center relative">
         <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 mb-2 tracking-tight">
           Exam <span className="text-blue-600">Smart</span> Splitter
@@ -453,6 +453,17 @@ const App: React.FC = () => {
               <button onClick={() => setShowDebug(false)} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${!showDebug ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>Results</button>
               <button onClick={() => setShowDebug(true)} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${showDebug ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>Debug View</button>
             </div>
+            
+            {rawPages.length > 0 && (
+              <button
+                onClick={() => setShowSettingsPanel(!showSettingsPanel)}
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-sm border ${showSettingsPanel ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+                Refine
+              </button>
+            )}
+
             <button onClick={handleReset} className="px-6 py-2.5 rounded-xl text-sm font-bold text-slate-600 bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 transition-all flex items-center gap-2 shadow-sm">Reset</button>
           </div>
         )}
@@ -540,41 +551,55 @@ const App: React.FC = () => {
         {showDebug ? <DebugRawView pages={rawPages} /> : (questions.length > 0 && <QuestionGrid questions={questions} rawPages={rawPages} />)}
       </main>
       
-      {/* Refinement Panel */}
-      {rawPages.length > 0 && (
-        <div className={`fixed bottom-0 left-0 right-0 z-[100] transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) ${showSettingsPanel ? 'translate-y-0' : 'translate-y-[calc(100%-60px)]'}`}>
-          <div className="max-w-4xl mx-auto bg-white rounded-t-[3rem] shadow-[0_-25px_80px_rgba(0,0,0,0.15)] border border-slate-200 overflow-hidden">
-            <div className="flex items-center justify-between px-12 py-6 cursor-pointer bg-slate-50/50 backdrop-blur-xl border-b border-slate-100 hover:bg-slate-100/50 transition-colors" onClick={() => setShowSettingsPanel(!showSettingsPanel)}>
-              <div className="flex items-center gap-4">
-                 <div className={`w-3 h-3 rounded-full ${showSettingsPanel ? 'bg-blue-500 animate-pulse' : 'bg-slate-300'}`}></div>
-                 <h3 className="font-black text-slate-700 text-xs uppercase tracking-[0.3em]">Refine Settings</h3>
+      {/* Refinement Panel - Moved to Top Right Floating Dialog */}
+      {showSettingsPanel && rawPages.length > 0 && (
+        <div className="fixed top-24 right-4 z-[100] w-80 bg-white rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-200 overflow-hidden animate-[fade-in_0.2s_ease-out]">
+          <div className="p-5 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center backdrop-blur-sm">
+            <h3 className="font-black text-slate-700 text-xs uppercase tracking-[0.2em]">Refine Settings</h3>
+            <button 
+              onClick={() => setShowSettingsPanel(false)}
+              className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          <div className="p-6 space-y-5">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Crop Padding</label>
+              <div className="flex items-center gap-3 relative group">
+                <input type="number" value={cropSettings.cropPadding} onChange={(e) => setCropSettings(prev => ({ ...prev, cropPadding: Number(e.target.value) }))} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm" />
+                <span className="absolute right-4 text-[10px] text-slate-400 font-black uppercase select-none">px</span>
               </div>
-              <button className="text-slate-400 hover:text-blue-500 transition-colors">{showSettingsPanel ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg> : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>}</button>
             </div>
-            <div className="p-12 grid grid-cols-1 md:grid-cols-4 gap-10 items-end">
-              <div className="space-y-3">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Crop Padding</label>
-                <div className="flex items-center gap-3">
-                  <input type="number" value={cropSettings.cropPadding} onChange={(e) => setCropSettings(prev => ({ ...prev, cropPadding: Number(e.target.value) }))} className="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-                  <span className="text-[10px] text-slate-400 font-black uppercase">px</span>
-                </div>
+            
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Inner Pad</label>
+              <div className="flex items-center gap-3 relative group">
+                <input type="number" value={cropSettings.canvasPaddingLeft} onChange={(e) => { const v = Number(e.target.value); setCropSettings(p => ({ ...p, canvasPaddingLeft: v, canvasPaddingRight: v, canvasPaddingY: v })); }} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm" />
+                <span className="absolute right-4 text-[10px] text-slate-400 font-black uppercase select-none">px</span>
               </div>
-              <div className="space-y-3">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Inner Pad</label>
-                <div className="flex items-center gap-3">
-                  <input type="number" value={cropSettings.canvasPaddingLeft} onChange={(e) => { const v = Number(e.target.value); setCropSettings(p => ({ ...p, canvasPaddingLeft: v, canvasPaddingRight: v, canvasPaddingY: v })); }} className="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-                  <span className="text-[10px] text-slate-400 font-black uppercase">px</span>
-                </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Overlap</label>
+              <div className="flex items-center gap-3 relative group">
+                <input type="number" value={cropSettings.mergeOverlap} onChange={(e) => setCropSettings(p => ({ ...p, mergeOverlap: Number(e.target.value) }))} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm" />
+                <span className="absolute right-4 text-[10px] text-slate-400 font-black uppercase select-none">px</span>
               </div>
-              <div className="space-y-3">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Overlap</label>
-                <div className="flex items-center gap-3">
-                  <input type="number" value={cropSettings.mergeOverlap} onChange={(e) => setCropSettings(p => ({ ...p, mergeOverlap: Number(e.target.value) }))} className="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-                  <span className="text-[10px] text-slate-400 font-black uppercase">px</span>
-                </div>
-              </div>
-              <button onClick={handleRecropOnly} disabled={isProcessing} className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-2xl shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50">
-                {status === ProcessingStatus.CROPPING ? <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>Recrop</>}
+            </div>
+
+            <div className="pt-2">
+              <button 
+                onClick={handleRecropOnly} 
+                disabled={isProcessing} 
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-lg shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50 text-sm"
+              >
+                {status === ProcessingStatus.CROPPING ? (
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> 
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                )}
+                Recrop Images
               </button>
             </div>
           </div>
