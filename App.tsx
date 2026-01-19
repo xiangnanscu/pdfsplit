@@ -321,19 +321,28 @@ const App: React.FC = () => {
     setShowHistory(false);
     setIsLoadingHistory(true);
     setStatus(ProcessingStatus.LOADING_PDF);
-    setDetailedStatus(`Restoring ${ids.length} exams from history...`);
+    setDetailedStatus(`Queuing ${ids.length} exams from history...`);
 
     try {
-      const loadPromises = ids.map(id => loadExamResult(id));
-      const results = await Promise.all(loadPromises);
-      
+      // Chunk loading to prevent Memory Spikes and UI freeze when loading massive data from IDB
+      // Browser memory can handle ~500 items, but loading them all via Promise.all is unsafe.
+      const CHUNK_SIZE = 10;
       const combinedPages: DebugPageData[] = [];
       
-      results.forEach(res => {
-        if (res && res.rawPages) {
-            combinedPages.push(...res.rawPages);
-        }
-      });
+      for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+         const chunk = ids.slice(i, i + CHUNK_SIZE);
+         setDetailedStatus(`Restoring data batch ${Math.min(i + CHUNK_SIZE, ids.length)}/${ids.length}...`);
+         
+         const results = await Promise.all(chunk.map(id => loadExamResult(id)));
+         results.forEach(res => {
+            if (res && res.rawPages) {
+                combinedPages.push(...res.rawPages);
+            }
+         });
+         
+         // Small delay to allow GC and UI update
+         await new Promise(r => setTimeout(r, 10));
+      }
 
       if (combinedPages.length === 0) {
         throw new Error("No valid data found in selected items.");
@@ -391,11 +400,12 @@ const App: React.FC = () => {
   };
 
   /**
-   * Generates processed questions from raw debug data with MAXIMUM Parallelism.
+   * Generates processed questions from raw debug data with PIPELINED Processing.
+   * Restructured to avoid OOM / Canvas Limit errors when processing hundreds of files.
+   * Instead of "Crop All -> Merge All -> Export All", we do "Process File 1... Process File 2...".
    */
   const generateQuestionsFromRawPages = async (pages: DebugPageData[], settings: CropSettings, signal: AbortSignal): Promise<QuestionImage[]> => {
-    // 1. Prepare Tasks
-    // Group detections into flat list of tasks to maximize parallelism across all files
+    // 1. Prepare Tasks grouped by File
     type CropTask = {
         pageIndex: number;
         detIndex: number;
@@ -404,10 +414,14 @@ const App: React.FC = () => {
         detection: DetectedQuestion;
     };
 
-    const tasks: CropTask[] = [];
+    const tasksByFile = new Map<string, CropTask[]>();
+
     pages.forEach((page, pIdx) => {
         page.detections.forEach((det, dIdx) => {
-            tasks.push({
+            if (!tasksByFile.has(page.fileName)) {
+                tasksByFile.set(page.fileName, []);
+            }
+            tasksByFile.get(page.fileName)!.push({
                 pageIndex: pIdx,
                 detIndex: dIdx,
                 fileId: page.fileName,
@@ -417,139 +431,112 @@ const App: React.FC = () => {
         });
     });
 
-    if (tasks.length === 0) return [];
+    if (tasksByFile.size === 0) return [];
 
-    // Maximize Concurrency for Image Operations
-    // Browsers can usually handle high concurrent image decoding/encoding tasks (off-main-thread).
-    // We use hardwareConcurrency * 2 as a heuristic for high-throughput machines, capped at a reasonable max.
-    const cpuCount = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
-    // For 32 threads, this will be 64. For 8 threads, 16. Minimum 32 to ensure saturation.
-    const processConcurrency = Math.max(cpuCount * 2, 32); 
+    // FILE Level Concurrency. 
+    // Since each file may spawn 10-20 canvases internally, we keep file concurrency low (e.g., 4)
+    // to prevent hitting the browser's 4000-8000 canvas/context limit.
+    const FILE_CONCURRENCY = 4;
+    const fileList = Array.from(tasksByFile.entries());
 
-    console.log(`Starting parallel processing with ${processConcurrency} concurrent workers for ${tasks.length} items.`);
+    console.log(`Starting pipelined processing for ${fileList.length} files with concurrency ${FILE_CONCURRENCY}.`);
 
-    // Phase 1: Parallel Crop (Construct Canvas)
-    // This loads images and draws the initial crop. 
-    // Heavy on Image Decoding (async) and Memory.
-    const cropResults = await pMap(tasks, async (task) => {
-        const boxes = normalizeBoxes(task.detection.boxes_2d);
-        const result = await constructQuestionCanvas(
-            task.pageObj.dataUrl,
-            boxes,
-            task.pageObj.width,
-            task.pageObj.height,
-            settings
-        );
-        
-        setCroppingDone(prev => prev + 1);
-        
-        return {
-            ...result,
-            task
-        };
-    }, processConcurrency, signal);
+    // Process files in parallel batches
+    const fileResults = await pMap(fileList, async ([fileId, fileTasks]) => {
+        if (signal.aborted) return [];
 
-    if (signal.aborted) return [];
+        // --- SUB-PIPELINE FOR SINGLE FILE ---
+        // This ensures all canvases for this file are created AND released within this scope.
 
-    // Phase 2: Sequential Merging (Per File)
-    // We must process detections in their original order to handle 'continuation' correctly.
-    
-    const fileGroups = new Map<string, typeof cropResults>();
-    cropResults.forEach(res => {
-        const key = res.task.fileId;
-        if (!fileGroups.has(key)) fileGroups.set(key, []);
-        fileGroups.get(key)!.push(res);
-    });
+        // 1. Parallel Crop (Construct Canvas) for items in THIS file
+        // Can be higher concurrency since it's limited to one file's items
+        const cropResults = await Promise.all(fileTasks.map(async (task) => {
+            const boxes = normalizeBoxes(task.detection.boxes_2d);
+            const result = await constructQuestionCanvas(
+                task.pageObj.dataUrl,
+                boxes,
+                task.pageObj.width,
+                task.pageObj.height,
+                settings
+            );
+            setCroppingDone(prev => prev + 1);
+            return { ...result, task };
+        }));
 
-    // Ensure strict order: Page -> Detection Index
-    for (const group of fileGroups.values()) {
-        group.sort((a, b) => {
+        // 2. Sequential Merging (Sort & Merge)
+        // Ensure strict order: Page -> Detection Index
+        cropResults.sort((a, b) => {
             if (a.task.pageIndex !== b.task.pageIndex) return a.task.pageIndex - b.task.pageIndex;
             return a.task.detIndex - b.task.detIndex;
         });
-    }
 
-    type ExportTask = {
-        canvas: HTMLCanvasElement | OffscreenCanvas;
-        id: string;
-        pageNumber: number;
-        fileName: string;
-        originalDataUrl?: string;
-    };
-    
-    const exportTasks: ExportTask[] = [];
+        type ExportTask = {
+            canvas: HTMLCanvasElement | OffscreenCanvas;
+            id: string;
+            pageNumber: number;
+            fileName: string;
+            originalDataUrl?: string;
+        };
+        
+        const fileExportTasks: ExportTask[] = [];
 
-    // Merging is fast (in-memory canvas op), so we do it sequentially loop over files/items
-    // to build the list of final canvases to be processed.
-    for (const [fileName, items] of fileGroups) {
-        const fileItems: ExportTask[] = [];
-
-        for (const item of items) {
+        for (const item of cropResults) {
             if (!item.canvas) continue;
-
             const isContinuation = item.task.detection.id === 'continuation';
             
-            if (isContinuation && fileItems.length > 0) {
-                 const lastIdx = fileItems.length - 1;
-                 const lastQ = fileItems[lastIdx];
-                 
+            if (isContinuation && fileExportTasks.length > 0) {
+                 const lastIdx = fileExportTasks.length - 1;
+                 const lastQ = fileExportTasks[lastIdx];
                  // Merge logic
                  const merged = mergeCanvasesVertical(lastQ.canvas, item.canvas, -settings.mergeOverlap);
-                 
-                 fileItems[lastIdx] = {
+                 // Replaces previous canvas, effectively releasing the old one for GC
+                 fileExportTasks[lastIdx] = {
                      ...lastQ,
                      canvas: merged.canvas
-                     // Keep original ID and meta
                  };
             } else {
-                fileItems.push({
+                fileExportTasks.push({
                     canvas: item.canvas,
                     id: item.task.detection.id,
                     pageNumber: item.task.pageObj.pageNumber,
-                    fileName: fileName,
+                    fileName: fileId,
                     originalDataUrl: item.originalDataUrl
                 });
             }
         }
-        exportTasks.push(...fileItems);
-    }
+
+        // 3. Analyze & Export to DataURL
+        // Pre-calculate width for alignment
+        let maxFileWidth = 0;
+        const analyzedTasks = fileExportTasks.map(item => {
+             const trim = analyzeCanvasContent(item.canvas);
+             if (trim.w > maxFileWidth) maxFileWidth = trim.w;
+             return { ...item, trim };
+        });
+
+        const finalImages = await Promise.all(analyzedTasks.map(async (q) => {
+            const finalDataUrl = await generateAlignedImage(q.canvas, q.trim, maxFileWidth, settings);
+            
+            // Explicitly help GC if possible (though scope exit handles it mostly)
+            if ('width' in q.canvas) { q.canvas.width = 0; q.canvas.height = 0; }
+
+            return {
+                id: q.id,
+                pageNumber: q.pageNumber,
+                fileName: q.fileName,
+                dataUrl: finalDataUrl,
+                originalDataUrl: q.originalDataUrl
+            };
+        }));
+
+        return finalImages;
+
+    }, FILE_CONCURRENCY, signal);
 
     if (signal.aborted) return [];
 
-    // Phase 3: Parallel Export (Analyze & Align & Encode)
-    // 1. Analyze (get trim bounds) - CPU intensive (pixel scan)
-    // 2. Align & Encode (toDataURL) - I/O intensive
-    
-    // First, analyze all to determine max widths per file in parallel
-    const analyzedTasks = await pMap(exportTasks, async (item) => {
-        const trim = analyzeCanvasContent(item.canvas);
-        return { ...item, trim };
-    }, processConcurrency, signal);
-
-    if (signal.aborted) return [];
-
-    // Calculate max widths per file to ensure alignment
-    const fileWidths = new Map<string, number>();
-    analyzedTasks.forEach(q => {
-        const current = fileWidths.get(q.fileName) || 0;
-        if (q.trim.w > current) fileWidths.set(q.fileName, q.trim.w);
-    });
-
-    // Final Generation in Parallel
-    const resultImages = await pMap(analyzedTasks, async (q) => {
-        const maxWidth = fileWidths.get(q.fileName) || q.trim.w;
-        const finalDataUrl = await generateAlignedImage(q.canvas, q.trim, maxWidth, settings);
-        
-        return {
-            id: q.id,
-            pageNumber: q.pageNumber,
-            fileName: q.fileName,
-            dataUrl: finalDataUrl,
-            originalDataUrl: q.originalDataUrl
-        };
-    }, processConcurrency, signal);
-
-    return resultImages;
+    // Flatten results
+    return fileResults.flat();
   };
 
   /**
