@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
@@ -222,9 +223,13 @@ const App: React.FC = () => {
       const result = await loadExamResult(id);
       if (!result) throw new Error("History record not found.");
 
-      setRawPages(result.rawPages);
+      // Cleanse loaded data for unique pages (in case loaded history is corrupted from before)
+      const uniquePages = Array.from(new Map(result.rawPages.map(p => [p.pageNumber, p])).values());
+      uniquePages.sort((a, b) => a.pageNumber - b.pageNumber);
+
+      setRawPages(uniquePages);
       
-      const recoveredSourcePages = result.rawPages.map(rp => ({
+      const recoveredSourcePages = uniquePages.map(rp => ({
         dataUrl: rp.dataUrl,
         width: rp.width,
         height: rp.height,
@@ -236,15 +241,15 @@ const App: React.FC = () => {
       setStatus(ProcessingStatus.CROPPING);
       setDetailedStatus('Applying current crop settings...');
       
-      const totalDetections = result.rawPages.reduce((acc, p) => acc + p.detections.length, 0);
+      const totalDetections = uniquePages.reduce((acc, p) => acc + p.detections.length, 0);
       setCroppingTotal(totalDetections);
       setCroppingDone(0);
-      setTotal(result.rawPages.length);
-      setCompletedCount(result.rawPages.length);
+      setTotal(uniquePages.length);
+      setCompletedCount(uniquePages.length);
 
       abortControllerRef.current = new AbortController();
       const generatedQuestions = await generateQuestionsFromRawPages(
-        result.rawPages, 
+        uniquePages, 
         cropSettings, 
         abortControllerRef.current.signal
       );
@@ -606,9 +611,11 @@ const App: React.FC = () => {
     try {
       if (cachedRawPages.length > 0) {
          setDetailedStatus("Restoring cached files...");
-         setRawPages(prev => [...prev, ...cachedRawPages]);
+         // Dedup cached pages
+         const uniqueCached = Array.from(new Map(cachedRawPages.map(p => [`${p.fileName}-${p.pageNumber}`, p])).values());
+         setRawPages(prev => [...prev, ...uniqueCached]);
          
-         const recoveredSourcePages = cachedRawPages.map(rp => ({
+         const recoveredSourcePages = uniqueCached.map(rp => ({
             dataUrl: rp.dataUrl,
             width: rp.width,
             height: rp.height,
@@ -617,13 +624,13 @@ const App: React.FC = () => {
          }));
          setSourcePages(prev => [...prev, ...recoveredSourcePages]);
          
-         const cachedQuestions = await generateQuestionsFromRawPages(cachedRawPages, cropSettings, signal);
+         const cachedQuestions = await generateQuestionsFromRawPages(uniqueCached, cropSettings, signal);
          if (!signal.aborted) {
             setQuestions(prev => {
                 const combined = [...prev, ...cachedQuestions];
                 return combined.sort((a,b) => a.fileName.localeCompare(b.fileName));
             });
-            setCompletedCount(prev => prev + cachedRawPages.length);
+            setCompletedCount(prev => prev + uniqueCached.length);
          }
       }
 
@@ -720,7 +727,12 @@ const App: React.FC = () => {
                                  meta.cropped = true;
                                  
                                  setRawPages(current => {
-                                     const filePages = [...current.filter(p => p.fileName === pageData.fileName), resultPage];
+                                     // FILTER CURRENT RAW PAGES FOR THIS FILE
+                                     // Fix: Previously we did [...current.filter, resultPage] here.
+                                     // But setRawPages(prev => [...prev, resultPage]) was already called above.
+                                     // Because functional updates queue, 'current' ALREADY contains 'resultPage'.
+                                     // Adding it again created a duplicate.
+                                     const filePages = current.filter(p => p.fileName === pageData.fileName);
                                      filePages.sort((a,b) => a.pageNumber - b.pageNumber);
                                      
                                      saveExamResult(pageData.fileName, filePages).then(() => loadHistoryList());

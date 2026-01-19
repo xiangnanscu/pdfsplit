@@ -37,12 +37,16 @@ export const saveExamResult = async (fileName: string, rawPages: DebugPageData[]
   const id = crypto.randomUUID();
   const timestamp = Date.now();
 
+  // Safety: Deduplicate pages by pageNumber before saving to prevent DB corruption
+  const uniquePages = Array.from(new Map(rawPages.map(item => [item.pageNumber, item])).values());
+  uniquePages.sort((a, b) => a.pageNumber - b.pageNumber);
+
   const record = {
     id,
     name: fileName,
     timestamp,
-    pageCount: rawPages.length,
-    rawPages // This includes the heavy Base64 images
+    pageCount: uniquePages.length,
+    rawPages: uniquePages // This includes the heavy Base64 images
   };
 
   return new Promise((resolve, reject) => {
