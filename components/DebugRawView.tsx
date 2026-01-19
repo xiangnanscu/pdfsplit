@@ -13,6 +13,7 @@ interface Props {
   hasNextFile?: boolean;
   hasPrevFile?: boolean;
   onUpdateDetections?: (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => void;
+  isProcessing?: boolean;
 }
 
 // Default settings for debug visualization - STRICT mode
@@ -35,7 +36,8 @@ export const DebugRawView: React.FC<Props> = ({
   onPrevFile,
   hasNextFile,
   hasPrevFile,
-  onUpdateDetections
+  onUpdateDetections,
+  isProcessing = false
 }) => {
   // Key format: "fileName||pageNumber||detIndex"
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -304,7 +306,7 @@ export const DebugRawView: React.FC<Props> = ({
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left: 50% Width, Scrollable Paper View */}
-        <div className="w-1/2 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-8 bg-slate-950 custom-scrollbar border-r border-slate-800">
+        <div className="w-1/2 overflow-y-auto overflow-x-hidden p-4 flex flex-col gap-8 bg-slate-950 custom-scrollbar border-r border-slate-800 relative">
           {pages.map((page) => (
             <div key={`${page.fileName}-${page.pageNumber}`} className="w-full relative group">
               <div className="flex justify-between items-end mb-2 px-1">
@@ -402,7 +404,7 @@ export const DebugRawView: React.FC<Props> = ({
                       })}
 
                       {/* Interactive Drag Handles - Only for selected page and active column */}
-                      {selectedDetection && selectedDetection.pageNumber === page.pageNumber && columnInfo && (
+                      {selectedDetection && selectedDetection.pageNumber === page.pageNumber && columnInfo && !isProcessing && (
                         <>
                           {/* Left Line */}
                           <line 
@@ -467,6 +469,16 @@ export const DebugRawView: React.FC<Props> = ({
             </div>
           ))}
           <div className="h-20"></div>
+
+          {/* Processing Overlay for Left Panel */}
+          {isProcessing && (
+              <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50">
+                  <div className="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center animate-bounce-in">
+                      <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+                      <h4 className="text-slate-800 font-bold text-sm">Regenerating Images...</h4>
+                  </div>
+              </div>
+          )}
         </div>
 
         {/* Right: 50% Width, Inspector Sidebar */}
@@ -475,7 +487,13 @@ export const DebugRawView: React.FC<Props> = ({
             <h3 className="text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">Inspector</h3>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-8">
+          <div className="flex-1 overflow-y-auto p-8 relative">
+            {isProcessing && (
+               <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] z-50 flex items-center justify-center">
+                    <span className="text-blue-400 font-black uppercase tracking-widest text-xs animate-pulse">Syncing...</span>
+               </div>
+            )}
+            
             {selectedKey ? (
               <div className="space-y-12 animate-[fade-in_0.3s_ease-out]">
                   {/* Header Info */}

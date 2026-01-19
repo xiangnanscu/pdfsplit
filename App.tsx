@@ -468,21 +468,59 @@ const App: React.FC = () => {
    * Updates detections for a specific page via Debug View (Drag & Drop column adjustment).
    */
   const handleUpdateDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => {
-      // 1. Update React State immediately for visual feedback
-      setRawPages(prev => prev.map(p => {
+      // 1. Calculate updated pages first to allow immediate usage
+      const updatedPages = rawPages.map(p => {
           if (p.fileName === fileName && p.pageNumber === pageNumber) {
               return { ...p, detections: newDetections };
           }
           return p;
-      }));
+      });
 
-      // 2. Persist to IndexedDB
+      // 2. Update React State immediately for visual feedback
+      setRawPages(updatedPages);
+
+      // 3. Persist to IndexedDB and Trigger Recrop
       try {
           await updatePageDetections(fileName, pageNumber, newDetections);
           console.log(`Saved updated detections for ${fileName} Page ${pageNumber}`);
+          
+          // Trigger Re-Crop for this file to update actual images
+          // We manually call the logic here to ensure we use 'updatedPages' locally
+          const targetPages = updatedPages.filter(p => p.fileName === fileName);
+          if (targetPages.length === 0) return;
+
+          abortControllerRef.current = new AbortController();
+          setStatus(ProcessingStatus.CROPPING);
+          setStartTime(Date.now());
+          
+          const detectionsInFile = targetPages.reduce((acc, p) => acc + p.detections.length, 0);
+          setCroppingTotal(detectionsInFile);
+          setCroppingDone(0);
+          setDetailedStatus(`Applying changes to ${fileName}...`);
+          
+          const newQuestions = await generateQuestionsFromRawPages(
+              targetPages, 
+              cropSettings, 
+              abortControllerRef.current.signal
+          );
+          
+          if (!abortControllerRef.current.signal.aborted) {
+              setQuestions(prev => {
+                  const others = prev.filter(q => q.fileName !== fileName);
+                  const combined = [...others, ...newQuestions];
+                  return combined.sort((a,b) => {
+                     if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
+                     if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+                     return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
+                  });
+              });
+              setStatus(ProcessingStatus.COMPLETED);
+          }
+
       } catch (err) {
-          console.error("Failed to save updated detections", err);
-          alert("Warning: Failed to save changes to history.");
+          console.error("Failed to save or recrop", err);
+          alert("Warning: Failed to apply changes completely.");
+          setStatus(ProcessingStatus.ERROR);
       }
   };
 
@@ -982,6 +1020,7 @@ const App: React.FC = () => {
                 hasNextFile={hasNextFile}
                 hasPrevFile={hasPrevFile}
                 onUpdateDetections={handleUpdateDetections}
+                isProcessing={isProcessing}
             />
         )}
 
