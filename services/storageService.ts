@@ -147,9 +147,10 @@ export const deleteExamResults = async (ids: string[]): Promise<void> => {
 };
 
 /**
- * Clean up a history item by removing duplicate pages
+ * Clean up a history item by removing duplicate pages.
+ * Returns the number of duplicates removed.
  */
-export const cleanupHistoryItem = async (id: string): Promise<void> => {
+export const cleanupHistoryItem = async (id: string): Promise<number> => {
   const db = await openDB();
   
   // 1. Get the record
@@ -161,7 +162,7 @@ export const cleanupHistoryItem = async (id: string): Promise<void> => {
     request.onerror = () => reject(request.error);
   });
 
-  if (!record || !record.rawPages) return;
+  if (!record || !record.rawPages) return 0;
 
   // 2. De-duplicate based on pageNumber
   const originalCount = record.rawPages.length;
@@ -184,13 +185,13 @@ export const cleanupHistoryItem = async (id: string): Promise<void> => {
   uniquePages.sort((a: any, b: any) => a.pageNumber - b.pageNumber);
 
   // If no change, exit
-  if (uniquePages.length === originalCount) return;
+  if (uniquePages.length === originalCount) return 0;
 
   // 3. Update the record
   record.rawPages = uniquePages;
   record.pageCount = uniquePages.length;
 
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
      const transaction = db.transaction([STORE_NAME], "readwrite");
      const store = transaction.objectStore(STORE_NAME);
      const request = store.put(record);
@@ -198,4 +199,29 @@ export const cleanupHistoryItem = async (id: string): Promise<void> => {
      request.onsuccess = () => resolve();
      request.onerror = () => reject(request.error);
   });
+
+  return originalCount - uniquePages.length;
+};
+
+/**
+ * Iterates through ALL history items and removes duplicates.
+ * Returns total pages removed across all exams.
+ */
+export const cleanupAllHistory = async (): Promise<number> => {
+  const list = await getHistoryList();
+  let totalRemoved = 0;
+  
+  // We process sequentially to avoid jamming the DB transaction if the files are huge
+  for (const item of list) {
+      try {
+          const removed = await cleanupHistoryItem(item.id);
+          if (removed > 0) {
+              console.log(`Cleaned ${removed} duplicates from ${item.name}`);
+          }
+          totalRemoved += removed;
+      } catch (e) {
+          console.error(`Failed to cleanup ${item.name}`, e);
+      }
+  }
+  return totalRemoved;
 };

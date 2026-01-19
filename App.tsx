@@ -13,7 +13,7 @@ import { HistorySidebar } from './components/HistorySidebar';
 import { RefinementModal } from './components/RefinementModal';
 import { renderPageToImage, constructQuestionCanvas, mergeCanvasesVertical, analyzeCanvasContent, generateAlignedImage, CropSettings } from './services/pdfService';
 import { detectQuestionsOnPage } from './services/geminiService';
-import { saveExamResult, getHistoryList, loadExamResult } from './services/storageService';
+import { saveExamResult, getHistoryList, loadExamResult, cleanupAllHistory } from './services/storageService';
 
 const DEFAULT_SETTINGS: CropSettings = {
   cropPadding: 25,
@@ -210,6 +210,21 @@ const App: React.FC = () => {
     setCurrentRound(1);
     setFailedCount(0);
     if (window.location.search) window.history.pushState({}, '', window.location.pathname);
+  };
+
+  const handleCleanupAllHistory = async () => {
+      try {
+          const removedCount = await cleanupAllHistory();
+          await loadHistoryList();
+          if (removedCount > 0) {
+              alert(`Maintenance complete. Cleaned ${removedCount} duplicate pages across your history.`);
+          } else {
+              alert(`Maintenance complete. No duplicate pages found.`);
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Failed to cleanup history.");
+      }
   };
 
   const handleLoadHistory = async (id: string) => {
@@ -944,6 +959,7 @@ const App: React.FC = () => {
         onLoadHistory={handleLoadHistory}
         onBatchLoadHistory={handleBatchLoadHistory}
         onRefreshList={loadHistoryList}
+        onCleanupAll={handleCleanupAllHistory}
       />
       
       {refiningFile && (

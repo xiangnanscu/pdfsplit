@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { HistoryMetadata } from '../types';
-import { deleteExamResult, deleteExamResults, cleanupHistoryItem } from '../services/storageService';
+import { deleteExamResult, deleteExamResults } from '../services/storageService';
 
 interface Props {
   isOpen: boolean;
@@ -11,6 +11,7 @@ interface Props {
   onLoadHistory: (id: string) => void;
   onBatchLoadHistory: (ids: string[]) => void;
   onRefreshList: () => void;
+  onCleanupAll: () => void; // New prop for global cleanup
 }
 
 const formatDate = (ts: number): string => {
@@ -24,10 +25,11 @@ export const HistorySidebar: React.FC<Props> = ({
   isLoading, 
   onLoadHistory,
   onBatchLoadHistory,
-  onRefreshList 
+  onRefreshList,
+  onCleanupAll
 }) => {
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set());
-  const [isCleaning, setIsCleaning] = useState<string | null>(null);
+  const [isCleaning, setIsCleaning] = useState(false);
 
   const handleToggleHistorySelection = (id: string) => {
     const newSet = new Set(selectedHistoryIds);
@@ -69,17 +71,12 @@ export const HistorySidebar: React.FC<Props> = ({
     }
   };
 
-  const handleCleanupItem = async (id: string, e: React.MouseEvent) => {
-      e.stopPropagation();
-      setIsCleaning(id);
+  const handleGlobalCleanup = async () => {
+      setIsCleaning(true);
       try {
-          await cleanupHistoryItem(id);
-          onRefreshList();
-      } catch (error) {
-          console.error("Cleanup failed", error);
-          alert("Cleanup failed.");
+          await onCleanupAll();
       } finally {
-          setIsCleaning(null);
+          setIsCleaning(false);
       }
   };
 
@@ -90,10 +87,34 @@ export const HistorySidebar: React.FC<Props> = ({
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose}></div>
       <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-2xl animate-[fade-in_0.3s_ease-out] flex flex-col">
          <div className="p-6 border-b border-slate-100 bg-slate-50">
-           <div className="flex justify-between items-center mb-4">
+           <div className="flex justify-between items-start mb-4">
              <div>
                <h2 className="text-xl font-black text-slate-900 tracking-tight">Processing History</h2>
-               <p className="text-slate-400 text-xs font-bold">Local History (Stored in Browser)</p>
+               <p className="text-slate-400 text-xs font-bold mb-2">Local History (Stored in Browser)</p>
+               
+               <button 
+                  onClick={handleGlobalCleanup}
+                  disabled={isCleaning || historyList.length === 0}
+                  className={`
+                    text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border transition-all flex items-center gap-2
+                    ${isCleaning 
+                        ? 'bg-orange-50 text-orange-400 border-orange-100' 
+                        : 'bg-white text-slate-500 border-slate-200 hover:text-orange-500 hover:border-orange-200 hover:bg-orange-50'
+                    }
+                  `}
+               >
+                  {isCleaning ? (
+                      <>
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        Cleaning All Duplicates...
+                      </>
+                  ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                        Deep Clean Duplicates
+                      </>
+                  )}
+               </button>
              </div>
              <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 bg-white rounded-xl border border-slate-200 hover:bg-slate-100 transition-colors">
                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -164,14 +185,7 @@ export const HistorySidebar: React.FC<Props> = ({
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
-                          <button 
-                            onClick={(e) => handleCleanupItem(item.id, e)}
-                            disabled={isCleaning === item.id}
-                            className={`text-slate-300 hover:text-orange-500 p-1.5 rounded-lg hover:bg-orange-50 transition-colors ${isCleaning === item.id ? 'animate-pulse text-orange-400' : ''}`}
-                            title="Clean Duplicates"
-                          >
-                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
-                          </button>
+                          {/* Individual cleanup button removed as per request */}
                           <button 
                               onClick={(e) => deleteHistoryItem(item.id, e)}
                               className="text-slate-300 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
