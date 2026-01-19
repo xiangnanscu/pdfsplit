@@ -1,5 +1,5 @@
 
-import { DebugPageData, HistoryMetadata } from "../types";
+import { DebugPageData, HistoryMetadata, DetectedQuestion } from "../types";
 
 const DB_NAME = "MathSplitterDB";
 const STORE_NAME = "exams";
@@ -56,6 +56,56 @@ export const saveExamResult = async (fileName: string, rawPages: DebugPageData[]
 
     request.onsuccess = () => resolve(id);
     request.onerror = () => reject(request.error);
+  });
+};
+
+/**
+ * Update detections for a specific page in an existing exam record.
+ * Used for manual refinement/calibration.
+ */
+export const updatePageDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]): Promise<void> => {
+  const db = await openDB();
+  
+  // 1. Find the record by name (we have to search, as we might not have the UUID handy in all contexts, 
+  // or we scan the most recent one matching fileName. Ideally we pass UUID, but fileName is the app's primary key logic currently)
+  
+  // Get all metadata to find the ID
+  const list = await getHistoryList();
+  const targetItem = list.find(h => h.name === fileName); // Assuming unique filenames for active session
+  
+  if (!targetItem) {
+     console.warn("Could not find history record to update for", fileName);
+     return;
+  }
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    
+    // Get full record
+    const getReq = store.get(targetItem.id);
+    
+    getReq.onsuccess = () => {
+        const record = getReq.result;
+        if (!record || !record.rawPages) {
+            resolve();
+            return;
+        }
+
+        // Update the specific page
+        const pageIndex = record.rawPages.findIndex((p: DebugPageData) => p.pageNumber === pageNumber);
+        if (pageIndex !== -1) {
+            record.rawPages[pageIndex].detections = newDetections;
+            
+            // Save back
+            const putReq = store.put(record);
+            putReq.onsuccess = () => resolve();
+            putReq.onerror = () => reject(putReq.error);
+        } else {
+            resolve();
+        }
+    };
+    getReq.onerror = () => reject(getReq.error);
   });
 };
 

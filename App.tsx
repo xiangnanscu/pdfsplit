@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
-import { ProcessingStatus, QuestionImage, DebugPageData, ProcessedCanvas, HistoryMetadata } from './types';
+import { ProcessingStatus, QuestionImage, DebugPageData, ProcessedCanvas, HistoryMetadata, DetectedQuestion } from './types';
 import { ProcessingState } from './components/ProcessingState';
 import { QuestionGrid } from './components/QuestionGrid';
 import { DebugRawView } from './components/DebugRawView';
@@ -13,7 +13,7 @@ import { HistorySidebar } from './components/HistorySidebar';
 import { RefinementModal } from './components/RefinementModal';
 import { renderPageToImage, constructQuestionCanvas, mergeCanvasesVertical, analyzeCanvasContent, generateAlignedImage, CropSettings } from './services/pdfService';
 import { detectQuestionsOnPage } from './services/geminiService';
-import { saveExamResult, getHistoryList, loadExamResult, cleanupAllHistory } from './services/storageService';
+import { saveExamResult, getHistoryList, loadExamResult, cleanupAllHistory, updatePageDetections } from './services/storageService';
 
 const DEFAULT_SETTINGS: CropSettings = {
   cropPadding: 25,
@@ -462,6 +462,28 @@ const App: React.FC = () => {
        setError(e.message);
        setStatus(ProcessingStatus.ERROR);
     }
+  };
+
+  /**
+   * Updates detections for a specific page via Debug View (Drag & Drop column adjustment).
+   */
+  const handleUpdateDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => {
+      // 1. Update React State immediately for visual feedback
+      setRawPages(prev => prev.map(p => {
+          if (p.fileName === fileName && p.pageNumber === pageNumber) {
+              return { ...p, detections: newDetections };
+          }
+          return p;
+      }));
+
+      // 2. Persist to IndexedDB
+      try {
+          await updatePageDetections(fileName, pageNumber, newDetections);
+          console.log(`Saved updated detections for ${fileName} Page ${pageNumber}`);
+      } catch (err) {
+          console.error("Failed to save updated detections", err);
+          alert("Warning: Failed to save changes to history.");
+      }
   };
 
   const processZipFiles = async (files: { blob: Blob, name: string }[]) => {
@@ -959,6 +981,7 @@ const App: React.FC = () => {
                 onPrevFile={handlePrevFile}
                 hasNextFile={hasNextFile}
                 hasPrevFile={hasPrevFile}
+                onUpdateDetections={handleUpdateDetections}
             />
         )}
 
