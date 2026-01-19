@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
@@ -1160,6 +1161,8 @@ const App: React.FC = () => {
                 hasPrevFile={hasPrevFile}
                 onUpdateDetections={handleUpdateDetections}
                 isProcessing={isProcessing}
+                currentFileIndex={currentFileIndex + 1}
+                totalFiles={uniqueFileNames.length}
             />
         )}
 
