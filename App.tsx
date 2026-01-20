@@ -1431,23 +1431,6 @@ const App: React.FC = () => {
                 lastViewedFile={lastViewedFile}
             />
         )}
-        
-        {!debugFile && uniqueFileNames.length > 0 && !isGlobalProcessing && (
-           <div className="flex justify-end px-4 -mt-10 mb-4 sticky top-4 z-40 pointer-events-none">
-              <button 
-                  onClick={() => {
-                     const target = (lastViewedFile && uniqueFileNames.includes(lastViewedFile)) 
-                        ? lastViewedFile 
-                        : uniqueFileNames[0];
-                     updateDebugFile(target);
-                  }}
-                  className="pointer-events-auto bg-slate-900 text-white px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-700 transition-all shadow-lg flex items-center gap-2"
-              >
-                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                 {lastViewedFile && uniqueFileNames.includes(lastViewedFile) ? 'Resume Inspection' : 'Inspect Files'}
-              </button>
-           </div>
-        )}
 
       </main>
 
