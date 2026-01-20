@@ -40,8 +40,6 @@ interface ListChildComponentProps {
   isScrolling?: boolean;
 }
 
-type SortOption = 'name_asc' | 'name_desc' | 'count_desc' | 'count_asc';
-
 const ROW_HEIGHT_HEADER = 100;
 const ROW_HEIGHT_GRID = 360;
 
@@ -126,7 +124,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
   const [zippingProgress, setZippingProgress] = useState<string>('');
   const [selectedImage, setSelectedImage] = useState<QuestionImage | null>(null);
   const [showOriginal, setShowOriginal] = useState(false); 
-  const [sortOption, setSortOption] = useState<SortOption>('name_asc');
 
   // Cast imports to any to bypass type errors in some environments
   const List = (ReactWindow as any).VariableSizeList || (ReactWindow as any).default?.VariableSizeList;
@@ -144,20 +141,11 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
   }, [questions]);
 
   const sortedFileNames = useMemo(() => {
-    const names = Object.keys(groupedQuestions);
-    switch (sortOption) {
-      case 'name_asc':
-        return names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-      case 'name_desc':
-        return names.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
-      case 'count_desc':
-        return names.sort((a, b) => groupedQuestions[b].length - groupedQuestions[a].length);
-      case 'count_asc':
-        return names.sort((a, b) => groupedQuestions[a].length - groupedQuestions[b].length);
-      default:
-        return names;
-    }
-  }, [groupedQuestions, sortOption]);
+    // Default Sorting: Alphabetical (Numeric aware for File 1, File 2, File 10)
+    return Object.keys(groupedQuestions).sort((a, b) => 
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+    );
+  }, [groupedQuestions]);
 
   // Handle Modal Navigation
   const handleNext = useCallback(() => {
@@ -309,32 +297,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                     <span className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
                     Extracted {questions.length} questions from {sortedFileNames.length} files
                   </p>
-                  
-                  {/* Sort Control */}
-                  <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
-                      <button 
-                        onClick={() => setSortOption('name_asc')}
-                        className={`p-1.5 rounded-md transition-all ${sortOption === 'name_asc' ? 'bg-white shadow text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-                        title="Name A-Z"
-                      >
-                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg>
-                      </button>
-                      <button 
-                        onClick={() => setSortOption('name_desc')}
-                        className={`p-1.5 rounded-md transition-all ${sortOption === 'name_desc' ? 'bg-white shadow text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-                        title="Name Z-A"
-                      >
-                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h5m1 0v12m0 0l-4-4m4 4l4-4" /></svg>
-                      </button>
-                      <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
-                      <button 
-                        onClick={() => setSortOption('count_desc')}
-                        className={`p-1.5 rounded-md transition-all ${sortOption === 'count_desc' ? 'bg-white shadow text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-                        title="Most Questions First"
-                      >
-                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                      </button>
-                  </div>
               </div>
             </div>
             <div className="flex gap-3">
