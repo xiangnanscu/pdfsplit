@@ -40,6 +40,8 @@ interface ListChildComponentProps {
   isScrolling?: boolean;
 }
 
+type SortOption = 'name_asc' | 'name_desc' | 'count_desc' | 'count_asc';
+
 const ROW_HEIGHT_HEADER = 100;
 const ROW_HEIGHT_GRID = 360;
 
@@ -56,7 +58,7 @@ const VirtualRow = ({ index, style, data }: ListChildComponentProps) => {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
              </div>
              <div className="min-w-0">
-               <h3 className="text-lg font-black text-slate-800 tracking-tight truncate">{row.fileName}</h3>
+               <h3 className="text-lg font-black text-slate-800 tracking-tight truncate" title={row.fileName}>{row.fileName}</h3>
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{row.totalInFile} Items</p>
              </div>
           </div>
@@ -124,6 +126,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
   const [zippingProgress, setZippingProgress] = useState<string>('');
   const [selectedImage, setSelectedImage] = useState<QuestionImage | null>(null);
   const [showOriginal, setShowOriginal] = useState(false); 
+  const [sortOption, setSortOption] = useState<SortOption>('name_asc');
 
   // Cast imports to any to bypass type errors in some environments
   const List = (ReactWindow as any).VariableSizeList || (ReactWindow as any).default?.VariableSizeList;
@@ -139,6 +142,22 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
     });
     return groups;
   }, [questions]);
+
+  const sortedFileNames = useMemo(() => {
+    const names = Object.keys(groupedQuestions);
+    switch (sortOption) {
+      case 'name_asc':
+        return names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+      case 'name_desc':
+        return names.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+      case 'count_desc':
+        return names.sort((a, b) => groupedQuestions[b].length - groupedQuestions[a].length);
+      case 'count_asc':
+        return names.sort((a, b) => groupedQuestions[a].length - groupedQuestions[b].length);
+      default:
+        return names;
+    }
+  }, [groupedQuestions, sortOption]);
 
   // Handle Modal Navigation
   const handleNext = useCallback(() => {
@@ -285,10 +304,38 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
               <h2 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Results</h2>
-              <p className="text-slate-500 font-semibold flex items-center gap-2 text-sm">
-                <span className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
-                Extracted {questions.length} questions from {Object.keys(groupedQuestions).length} files
-              </p>
+              <div className="flex flex-wrap items-center gap-4">
+                  <p className="text-slate-500 font-semibold flex items-center gap-2 text-sm">
+                    <span className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
+                    Extracted {questions.length} questions from {sortedFileNames.length} files
+                  </p>
+                  
+                  {/* Sort Control */}
+                  <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
+                      <button 
+                        onClick={() => setSortOption('name_asc')}
+                        className={`p-1.5 rounded-md transition-all ${sortOption === 'name_asc' ? 'bg-white shadow text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Name A-Z"
+                      >
+                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg>
+                      </button>
+                      <button 
+                        onClick={() => setSortOption('name_desc')}
+                        className={`p-1.5 rounded-md transition-all ${sortOption === 'name_desc' ? 'bg-white shadow text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Name Z-A"
+                      >
+                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h5m1 0v12m0 0l-4-4m4 4l4-4" /></svg>
+                      </button>
+                      <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
+                      <button 
+                        onClick={() => setSortOption('count_desc')}
+                        className={`p-1.5 rounded-md transition-all ${sortOption === 'count_desc' ? 'bg-white shadow text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                        title="Most Questions First"
+                      >
+                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                      </button>
+                  </div>
+              </div>
             </div>
             <div className="flex gap-3">
               <button 
@@ -299,9 +346,8 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                          return;
                      }
 
-                     // Get the first available file to start debugging
-                     const files = Object.keys(groupedQuestions);
-                     if (files.length > 0) onDebug(files[0]);
+                     // Get the first available file to start debugging (using sorted order)
+                     if (sortedFileNames.length > 0) onDebug(sortedFileNames[0]);
                   }}
                   className="group px-6 py-3 rounded-xl font-black transition-all flex items-center justify-center gap-2 shadow-lg min-w-[160px] tracking-tight uppercase text-xs bg-slate-800 text-white hover:bg-slate-700 active:scale-95"
               >
@@ -340,9 +386,11 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
               if (width >= 1280) columns = 4;
               if (width >= 1536) columns = 5;
 
-              // Compute virtual rows flattened from groups
+              // Compute virtual rows flattened from sorted groups
               const rows: RowData[] = [];
-              Object.entries(groupedQuestions).forEach(([fileName, fileQs]) => {
+              sortedFileNames.forEach((fileName) => {
+                const fileQs = groupedQuestions[fileName];
+                
                 // Header Row
                 rows.push({
                   type: 'header',
