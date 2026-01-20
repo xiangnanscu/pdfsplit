@@ -145,7 +145,7 @@ export const HistorySidebar: React.FC<Props> = ({
                 <h2 className="text-xl font-black text-slate-900 tracking-tight">Processing History</h2>
                 <p className="text-slate-400 text-xs font-bold mb-2">Local History (Stored in Browser)</p>
                 
-                <button 
+                { false && <button 
                     onClick={handleGlobalCleanup}
                     disabled={isCleaning || historyList.length === 0}
                     className={`
@@ -167,7 +167,7 @@ export const HistorySidebar: React.FC<Props> = ({
                           Deep Clean
                         </>
                     )}
-                </button>
+                </button> }
               </div>
               <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 bg-white rounded-xl border border-slate-200 hover:bg-slate-100 transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
