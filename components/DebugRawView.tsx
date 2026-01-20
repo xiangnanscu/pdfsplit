@@ -17,7 +17,8 @@ interface Props {
   hasPrevFile?: boolean;
   onUpdateDetections?: (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => void;
   onReanalyzeFile?: (fileName: string) => void;
-  isProcessing?: boolean;
+  isGlobalProcessing?: boolean;
+  processingFiles: Set<string>;
   currentFileIndex: number;
   totalFiles: number;
 }
@@ -34,7 +35,8 @@ export const DebugRawView: React.FC<Props> = ({
   hasPrevFile,
   onUpdateDetections,
   onReanalyzeFile,
-  isProcessing = false,
+  isGlobalProcessing = false,
+  processingFiles,
   currentFileIndex,
   totalFiles
 }) => {
@@ -49,6 +51,12 @@ export const DebugRawView: React.FC<Props> = ({
   const [leftPanelWidth, setLeftPanelWidth] = useState(70); // Initial 70%
   const [isResizingPanel, setIsResizingPanel] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Check if current file is processing
+  const isCurrentFileProcessing = useMemo(() => {
+     if (isGlobalProcessing) return true;
+     return title ? processingFiles.has(title) : false;
+  }, [isGlobalProcessing, processingFiles, title]);
 
   // Reset selected key when the file changes
   useEffect(() => {
@@ -267,7 +275,7 @@ export const DebugRawView: React.FC<Props> = ({
          onNextFile={onNextFile}
          onJumpToIndex={onJumpToIndex}
          onClose={onClose}
-         onReanalyze={onReanalyzeFile && title ? () => onReanalyzeFile(title) : undefined}
+         onReanalyze={!isCurrentFileProcessing && onReanalyzeFile && title ? () => onReanalyzeFile(title) : undefined}
          hasNextFile={hasNextFile}
          hasPrevFile={hasPrevFile}
       />
@@ -287,7 +295,7 @@ export const DebugRawView: React.FC<Props> = ({
                setDraggingSide(side);
                setDragValue(val);
            }}
-           isProcessing={isProcessing}
+           isProcessing={isCurrentFileProcessing}
            hasNextFile={!!hasNextFile}
            hasPrevFile={!!hasPrevFile}
            onTriggerNextFile={() => onNextFile && onNextFile()}
@@ -307,7 +315,7 @@ export const DebugRawView: React.FC<Props> = ({
             selectedDetection={selectedDetection}
             selectedImage={selectedImage}
             pageData={selectedPageData}
-            isProcessing={isProcessing}
+            isProcessing={isCurrentFileProcessing}
             draggingSide={draggingSide}
             dragValue={dragValue}
             columnInfo={columnInfo}

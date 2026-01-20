@@ -12,6 +12,7 @@ import { ConfigurationPanel } from './components/ConfigurationPanel';
 import { HistorySidebar } from './components/HistorySidebar';
 import { RefinementModal } from './components/RefinementModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { NotificationToast, AppNotification } from './components/NotificationToast';
 import { renderPageToImage, constructQuestionCanvas, mergeCanvasesVertical, analyzeCanvasContent, generateAlignedImage, CropSettings } from './services/pdfService';
 import { detectQuestionsOnPage } from './services/geminiService';
 import { saveExamResult, getHistoryList, loadExamResult, cleanupAllHistory, updatePageDetections, reSaveExamResult } from './services/storageService';
@@ -109,6 +110,22 @@ const App: React.FC = () => {
   const [lastViewedFile, setLastViewedFile] = useState<string | null>(null); // Track last viewed file
   const [refiningFile, setRefiningFile] = useState<string | null>(null);
 
+  // Background Processing State
+  const [processingFiles, setProcessingFiles] = useState<Set<string>>(new Set());
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  
+  const addNotification = (fileName: string, type: 'success' | 'error', message: string) => {
+      const id = Date.now().toString() + Math.random().toString();
+      setNotifications(prev => [...prev, { id, fileName, type, message }]);
+      
+      // Auto dismiss success after 8 seconds
+      if (type === 'success') {
+          setTimeout(() => {
+              setNotifications(current => current.filter(n => n.id !== id));
+          }, 8000);
+      }
+  };
+
   // History State
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<HistoryMetadata[]>([]);
@@ -172,7 +189,7 @@ const App: React.FC = () => {
     return localStorage.getItem(STORAGE_KEYS.USE_HISTORY_CACHE) === 'true';
   });
 
-  // Progress States
+  // Progress States (Global)
   const [progress, setProgress] = useState(0); 
   const [total, setTotal] = useState(0);
   const [completedCount, setCompletedCount] = useState(0); 
@@ -191,6 +208,8 @@ const App: React.FC = () => {
   const [elapsedTime, setElapsedTime] = useState("00:00");
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Task specific abort controllers (for background tasks if we implemented cancel)
+  // For now, background tasks just run to completion or error.
 
   // Persistence Effects
   useEffect(() => {
@@ -293,6 +312,8 @@ const App: React.FC = () => {
     setElapsedTime("00:00");
     setCurrentRound(1);
     setFailedCount(0);
+    setProcessingFiles(new Set());
+    setNotifications([]);
     if (window.location.search) window.history.pushState({}, '', window.location.pathname);
   };
 
@@ -512,7 +533,10 @@ const App: React.FC = () => {
                 task.pageObj.height,
                 settings
             );
-            setCroppingDone(prev => prev + 1);
+            // Only update global cropping progress if we are in a global processing state
+            if (status === ProcessingStatus.CROPPING) {
+               setCroppingDone(prev => prev + 1);
+            }
             return { ...result, task };
         }));
 
@@ -594,57 +618,57 @@ const App: React.FC = () => {
 
   /**
    * Re-runs cropping for a specific file using specific settings.
+   * Runs in BACKGROUND without blocking global UI.
    */
   const handleRecropFile = async (fileName: string, specificSettings: CropSettings) => {
     const targetPages = rawPages.filter(p => p.fileName === fileName);
     if (targetPages.length === 0) return;
 
-    abortControllerRef.current = new AbortController();
-    setStatus(ProcessingStatus.CROPPING);
-    setStartTime(Date.now());
+    // Use a temporary controller for this specific task
+    const taskController = new AbortController();
     
-    const detectionsInFile = targetPages.reduce((acc, p) => acc + p.detections.length, 0);
-    setCroppingTotal(detectionsInFile);
-    setCroppingDone(0);
-    setDetailedStatus(`Refining ${fileName}...`);
+    setProcessingFiles(prev => new Set(prev).add(fileName));
+    setRefiningFile(null); // Close modal immediately
 
     try {
-       const newQuestions = await generateQuestionsFromRawPages(targetPages, specificSettings, abortControllerRef.current.signal);
+       const newQuestions = await generateQuestionsFromRawPages(targetPages, specificSettings, taskController.signal);
        
-       if (!abortControllerRef.current.signal.aborted) {
+       if (!taskController.signal.aborted) {
          setQuestions(prev => {
             const others = prev.filter(q => q.fileName !== fileName);
-            return [...others, ...newQuestions];
+            const combined = [...others, ...newQuestions];
+             return combined.sort((a,b) => {
+                 if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
+                 if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+                 return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
+              });
          });
-         setStatus(ProcessingStatus.COMPLETED);
-         setRefiningFile(null); 
+         addNotification(fileName, 'success', `Successfully refined ${fileName}`);
        }
     } catch (e: any) {
-       setError(e.message);
-       setStatus(ProcessingStatus.ERROR);
+       console.error(e);
+       addNotification(fileName, 'error', `Failed to refine ${fileName}: ${e.message}`);
+    } finally {
+       setProcessingFiles(prev => {
+           const next = new Set(prev);
+           next.delete(fileName);
+           return next;
+       });
     }
   };
 
   /**
-   * Execute actual logic for re-analysis
+   * Execute actual logic for re-analysis in BACKGROUND.
    */
   const executeReanalysis = async (fileName: string) => {
     const filePages = rawPages.filter(p => p.fileName === fileName).sort((a,b) => a.pageNumber - b.pageNumber);
     if (filePages.length === 0) return;
 
-    abortControllerRef.current = new AbortController();
-    const signal = abortControllerRef.current.signal;
-    stopRequestedRef.current = false;
+    const taskController = new AbortController();
+    const signal = taskController.signal;
 
-    setStatus(ProcessingStatus.DETECTING_QUESTIONS);
-    setDetailedStatus("Re-analyzing file with AI...");
-    setStartTime(Date.now());
+    setProcessingFiles(prev => new Set(prev).add(fileName));
     
-    setTotal(filePages.length);
-    setCompletedCount(0);
-    setCroppingTotal(0);
-    setCroppingDone(0);
-
     try {
         const updatedRawPages = [...rawPages];
         
@@ -654,7 +678,6 @@ const App: React.FC = () => {
             chunks.push(filePages.slice(i, i + concurrency));
         }
 
-        let processedCount = 0;
         const newResults: DebugPageData[] = [];
 
         for (const chunk of chunks) {
@@ -662,14 +685,9 @@ const App: React.FC = () => {
             
             await Promise.all(chunk.map(async (page) => {
                 const detections = await detectQuestionsOnPage(page.dataUrl, selectedModel);
-                
                 // Keep detections
                 const newPage = { ...page, detections };
                 newResults.push(newPage);
-                
-                // Update local state copy immediately for UI feedback if feasible, though complex in chunks
-                processedCount++;
-                setCompletedCount(processedCount);
             }));
         }
 
@@ -688,11 +706,6 @@ const App: React.FC = () => {
         await reSaveExamResult(fileName, finalFilePages);
 
         // 2. Cropping Phase
-        setStatus(ProcessingStatus.CROPPING);
-        setDetailedStatus("Regenerating images...");
-        const totalDetections = finalFilePages.reduce((acc, p) => acc + p.detections.length, 0);
-        setCroppingTotal(totalDetections);
-        
         const newQuestions = await generateQuestionsFromRawPages(finalFilePages, cropSettings, signal);
         
         if (!signal.aborted) {
@@ -705,14 +718,19 @@ const App: React.FC = () => {
                      return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
                   });
              });
-             setStatus(ProcessingStatus.COMPLETED);
+             addNotification(fileName, 'success', `AI Analysis completed for ${fileName}`);
              loadHistoryList(); // Refresh history list
         }
 
     } catch (error: any) {
         console.error(error);
-        setError(error.message);
-        setStatus(ProcessingStatus.ERROR);
+        addNotification(fileName, 'error', `Re-analysis failed for ${fileName}: ${error.message}`);
+    } finally {
+        setProcessingFiles(prev => {
+           const next = new Set(prev);
+           next.delete(fileName);
+           return next;
+       });
     }
   };
 
@@ -734,6 +752,7 @@ const App: React.FC = () => {
 
   /**
    * Updates detections for a specific page via Debug View (Drag & Drop column adjustment).
+   * Runs in BACKGROUND.
    */
   const handleUpdateDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => {
       // 1. Calculate updated pages first to allow immediate usage
@@ -747,32 +766,28 @@ const App: React.FC = () => {
       // 2. Update React State immediately for visual feedback
       setRawPages(updatedPages);
 
-      // 3. Persist to IndexedDB and Trigger Recrop
+      // 3. Persist to IndexedDB and Trigger Recrop in Background
+      setProcessingFiles(prev => new Set(prev).add(fileName));
+
       try {
           await updatePageDetections(fileName, pageNumber, newDetections);
           console.log(`Saved updated detections for ${fileName} Page ${pageNumber}`);
           
-          // Trigger Re-Crop for this file to update actual images
-          // We manually call the logic here to ensure we use 'updatedPages' locally
           const targetPages = updatedPages.filter(p => p.fileName === fileName);
-          if (targetPages.length === 0) return;
+          if (targetPages.length === 0) {
+              setProcessingFiles(prev => { const n = new Set(prev); n.delete(fileName); return n; });
+              return;
+          }
 
-          abortControllerRef.current = new AbortController();
-          setStatus(ProcessingStatus.CROPPING);
-          setStartTime(Date.now());
-          
-          const detectionsInFile = targetPages.reduce((acc, p) => acc + p.detections.length, 0);
-          setCroppingTotal(detectionsInFile);
-          setCroppingDone(0);
-          setDetailedStatus(`Applying changes to ${fileName}...`);
+          const taskController = new AbortController();
           
           const newQuestions = await generateQuestionsFromRawPages(
               targetPages, 
               cropSettings, 
-              abortControllerRef.current.signal
+              taskController.signal
           );
           
-          if (!abortControllerRef.current.signal.aborted) {
+          if (!taskController.signal.aborted) {
               setQuestions(prev => {
                   const others = prev.filter(q => q.fileName !== fileName);
                   const combined = [...others, ...newQuestions];
@@ -782,14 +797,22 @@ const App: React.FC = () => {
                      return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
                   });
               });
-              setStatus(ProcessingStatus.COMPLETED);
+              // Optional: Only notify on big changes or just silent update. 
+              // Since drag-drop is frequent, maybe silent or small toast? 
+              // User sees result immediately in Debug Panel usually, so we might skip notification or keep it subtle.
+              // Let's keep it silent for smoother UX, or very subtle. 
+              // The Inspector panel will show "Syncing..." which is enough.
           }
 
-      } catch (err) {
+      } catch (err: any) {
           console.error("Failed to save or recrop", err);
-          // Removed alert to avoid sandbox errors
-          setDetailedStatus("Warning: Failed to apply changes completely.");
-          setStatus(ProcessingStatus.ERROR);
+          addNotification(fileName, 'error', `Failed to save changes: ${err.message}`);
+      } finally {
+          setProcessingFiles(prev => {
+             const next = new Set(prev);
+             next.delete(fileName);
+             return next;
+         });
       }
   };
 
@@ -996,6 +1019,7 @@ const App: React.FC = () => {
     setCroppingDone(0);
     setCurrentRound(1);
     setFailedCount(0);
+    setProcessingFiles(new Set());
 
     const filesToProcess: File[] = [];
     const cachedRawPages: DebugPageData[] = [];
@@ -1151,6 +1175,7 @@ const App: React.FC = () => {
                                      
                                      saveExamResult(pageData.fileName, filePages).then(() => loadHistoryList());
                                      
+                                     // Initial load uses global signal
                                      generateQuestionsFromRawPages(filePages, cropSettings, signal).then(newQuestions => {
                                         if (!signal.aborted && !stopRequestedRef.current) {
                                             setQuestions(prevQ => [...prevQ, ...newQuestions]);
@@ -1247,7 +1272,8 @@ const App: React.FC = () => {
   };
 
   const isWideLayout = debugFile !== null || questions.length > 0 || sourcePages.length > 0;
-  const isProcessing = status === ProcessingStatus.LOADING_PDF || status === ProcessingStatus.DETECTING_QUESTIONS || status === ProcessingStatus.CROPPING;
+  // Global processing logic: only when loading initial PDF or detecting global questions
+  const isGlobalProcessing = status === ProcessingStatus.LOADING_PDF || status === ProcessingStatus.DETECTING_QUESTIONS || status === ProcessingStatus.CROPPING;
   const showInitialUI = status === ProcessingStatus.IDLE || (status === ProcessingStatus.ERROR && sourcePages.length === 0);
 
   return (
@@ -1255,7 +1281,7 @@ const App: React.FC = () => {
       <Header 
         onShowHistory={() => setShowHistory(true)} 
         onReset={handleReset} 
-        showReset={sourcePages.length > 0 && !isProcessing}
+        showReset={sourcePages.length > 0 && !isGlobalProcessing}
       />
 
       <main className={`mx-auto transition-all duration-300 ${isWideLayout ? 'w-full max-w-[98vw]' : 'max-w-4xl'}`}>
@@ -1290,7 +1316,7 @@ const App: React.FC = () => {
           elapsedTime={elapsedTime}
           currentRound={currentRound}
           failedCount={failedCount}
-          onAbort={isProcessing ? handleStop : undefined}
+          onAbort={isGlobalProcessing ? handleStop : undefined}
         />
         
         {debugFile && (
@@ -1306,7 +1332,8 @@ const App: React.FC = () => {
                 hasPrevFile={hasPrevFile}
                 onUpdateDetections={handleUpdateDetections}
                 onReanalyzeFile={handleReanalyzeFile}
-                isProcessing={isProcessing}
+                isGlobalProcessing={isGlobalProcessing}
+                processingFiles={processingFiles}
                 currentFileIndex={currentFileIndex + 1}
                 totalFiles={uniqueFileNames.length}
             />
@@ -1322,7 +1349,7 @@ const App: React.FC = () => {
             />
         )}
         
-        {!debugFile && uniqueFileNames.length > 0 && !isProcessing && (
+        {!debugFile && uniqueFileNames.length > 0 && !isGlobalProcessing && (
            <div className="flex justify-end px-4 -mt-10 mb-4 sticky top-4 z-40 pointer-events-none">
               <button 
                   onClick={() => {
@@ -1374,6 +1401,12 @@ const App: React.FC = () => {
         }}
         onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
         isDestructive={confirmState.isDestructive}
+      />
+
+      <NotificationToast 
+        notifications={notifications} 
+        onDismiss={(id) => setNotifications(prev => prev.filter(n => n.id !== id))}
+        onView={(fileName) => updateDebugFile(fileName)}
       />
 
       <footer className="mt-24 text-center text-slate-400 text-xs py-12 border-t border-slate-100 font-bold tracking-widest uppercase">
