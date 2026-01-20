@@ -595,7 +595,7 @@ export const DebugRawView: React.FC<Props> = ({
                                         className="cursor-col-resize hover:stroke-blue-400/50"
                                         x1={draggingSide === 'left' && dragValue !== null ? dragValue : columnInfo.initialLeft} y1="0" 
                                         x2={draggingSide === 'left' && dragValue !== null ? dragValue : columnInfo.initialLeft} y2="1000" 
-                                        stroke="transparent" strokeWidth="40" vectorEffect="non-scaling-stroke"
+                                        stroke="transparent" strokeWidth="12" vectorEffect="non-scaling-stroke"
                                         onMouseDown={(e) => handleSvgMouseDown(e, 'left')}
                                     />
                                 </>
@@ -612,7 +612,7 @@ export const DebugRawView: React.FC<Props> = ({
                                         className="cursor-col-resize hover:stroke-blue-400/50"
                                         x1={draggingSide === 'right' && dragValue !== null ? dragValue : columnInfo.initialRight} y1="0" 
                                         x2={draggingSide === 'right' && dragValue !== null ? dragValue : columnInfo.initialRight} y2="1000" 
-                                        stroke="transparent" strokeWidth="40" vectorEffect="non-scaling-stroke"
+                                        stroke="transparent" strokeWidth="12" vectorEffect="non-scaling-stroke"
                                         onMouseDown={(e) => handleSvgMouseDown(e, 'right')}
                                     />
                                 </>
@@ -629,7 +629,7 @@ export const DebugRawView: React.FC<Props> = ({
                                     className="cursor-row-resize hover:stroke-emerald-400/50"
                                     x1={selectedBoxCoords.xmin - 20} y1={draggingSide === 'top' && dragValue !== null ? dragValue : selectedBoxCoords.ymin} 
                                     x2={selectedBoxCoords.xmax + 20} y2={draggingSide === 'top' && dragValue !== null ? dragValue : selectedBoxCoords.ymin} 
-                                    stroke="transparent" strokeWidth="40" vectorEffect="non-scaling-stroke"
+                                    stroke="transparent" strokeWidth="12" vectorEffect="non-scaling-stroke"
                                     onMouseDown={(e) => handleSvgMouseDown(e, 'top')}
                                 />
                             </>
@@ -645,7 +645,7 @@ export const DebugRawView: React.FC<Props> = ({
                                     className="cursor-row-resize hover:stroke-emerald-400/50"
                                     x1={selectedBoxCoords.xmin - 20} y1={draggingSide === 'bottom' && dragValue !== null ? dragValue : selectedBoxCoords.ymax} 
                                     x2={selectedBoxCoords.xmax + 20} y2={draggingSide === 'bottom' && dragValue !== null ? dragValue : selectedBoxCoords.ymax} 
-                                    stroke="transparent" strokeWidth="40" vectorEffect="non-scaling-stroke"
+                                    stroke="transparent" strokeWidth="12" vectorEffect="non-scaling-stroke"
                                     onMouseDown={(e) => handleSvgMouseDown(e, 'bottom')}
                                 />
                             </>
