@@ -151,9 +151,9 @@ export const DebugInspectorPanel: React.FC<Props> = ({
                  />
                  <PreviewCard 
                     title="4. Final Output" 
-                    url={stages?.stage4} 
+                    url={selectedImage?.dataUrl || stages?.stage4} 
                     color="green" 
-                    desc="Aligned Result" 
+                    desc={selectedImage ? "Full Merged Result" : "Aligned Fragment"} 
                  />
               </div>
 
