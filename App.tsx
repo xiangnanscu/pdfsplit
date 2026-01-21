@@ -26,10 +26,10 @@ const App: React.FC = () => {
   const { state, setters, refs, actions } = useExamState();
   
   // 2. Logic Hooks
-  // Extract refreshHistoryList first as it is needed for useFileProcessor
+  // Extract refreshHistoryList first as it is needed for useFileProcessor and useRefinementActions
   const { handleCleanupAllHistory, handleLoadHistory, handleBatchLoadHistory, handleSyncLegacyData, refreshHistoryList } = useHistoryActions({ state, setters, refs, actions });
   const { processZipFiles, handleFileChange } = useFileProcessor({ state, setters, refs, actions, refreshHistoryList });
-  const { handleRecropFile, executeReanalysis, handleUpdateDetections } = useRefinementActions({ state, setters, actions });
+  const { handleRecropFile, executeReanalysis, handleUpdateDetections } = useRefinementActions({ state, setters, actions, refreshHistoryList });
 
   // 3. Local UI State
   const [confirmState, setConfirmState] = useState<{

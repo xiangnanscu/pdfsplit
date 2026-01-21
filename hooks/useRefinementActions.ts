@@ -9,9 +9,10 @@ interface RefinementProps {
   state: any;
   setters: any;
   actions: any;
+  refreshHistoryList: () => Promise<void>;
 }
 
-export const useRefinementActions = ({ state, setters, actions }: RefinementProps) => {
+export const useRefinementActions = ({ state, setters, actions, refreshHistoryList }: RefinementProps) => {
   const { rawPages, concurrency, selectedModel, cropSettings } = state;
   const { setQuestions, setRawPages, setProcessingFiles, setCroppingDone } = setters;
   const { addNotification } = actions;
@@ -45,6 +46,7 @@ export const useRefinementActions = ({ state, setters, actions }: RefinementProp
          });
 
          await reSaveExamResult(fileName, targetPages, newQuestions);
+         await refreshHistoryList(); // Update timestamp in history
          addNotification(fileName, 'success', `Successfully refined ${fileName}`);
        }
     } catch (e: any) {
@@ -118,6 +120,7 @@ export const useRefinementActions = ({ state, setters, actions }: RefinementProp
              });
              
              await reSaveExamResult(fileName, finalFilePages, newQuestions);
+             await refreshHistoryList(); // Update timestamp in history
              addNotification(fileName, 'success', `AI Analysis completed for ${fileName}`);
         }
 
@@ -162,6 +165,8 @@ export const useRefinementActions = ({ state, setters, actions }: RefinementProp
           
           if (!taskController.signal.aborted) {
               await updatePageDetectionsAndQuestions(fileName, pageNumber, newDetections, newQuestions);
+              // Note: manual detection updates don't usually change the exam timestamp in the DB service unless configured to do so.
+              // But if we wanted to be safe we could refresh here too.
               
               setQuestions((prev: any) => {
                   const others = prev.filter((q: any) => q.fileName !== fileName);

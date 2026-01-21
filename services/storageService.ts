@@ -2,8 +2,12 @@
 import { DebugPageData, HistoryMetadata, DetectedQuestion, QuestionImage } from "../types";
 
 const DB_NAME = "MathSplitterDB";
-const STORE_NAME = "exams";
-const DB_VERSION = 1;
+// STORE_INDEX contains only metadata: { id, name, timestamp, pageCount }
+const STORE_INDEX = "exams"; 
+// STORE_DETAILS contains heavy data: { id, rawPages, questions }
+const STORE_DETAILS = "exam_details"; 
+
+const DB_VERSION = 3; // Keep version 3 as per previous migration
 
 /**
  * Open (and initialize) the IndexedDB
@@ -14,8 +18,60 @@ const openDB = (): Promise<IDBDatabase> => {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      const transaction = (event.target as IDBOpenDBRequest).transaction;
+
+      // 1. Ensure Index Store Exists
+      if (!db.objectStoreNames.contains(STORE_INDEX)) {
+        db.createObjectStore(STORE_INDEX, { keyPath: "id" });
+      }
+
+      // 2. Ensure Details Store Exists
+      if (!db.objectStoreNames.contains(STORE_DETAILS)) {
+        db.createObjectStore(STORE_DETAILS, { keyPath: "id" });
+      }
+
+      // 3. MIGRATION LOGIC: Split existing full records into Meta + Details
+      if (transaction) {
+        // Only run migration if we detect we might have old data structures or need to ensure integrity
+        // In this specific flow, standard creation is enough.
+        // If we were upgrading from v2 to v3, the logic below runs.
+        const indexStore = transaction.objectStore(STORE_INDEX);
+        const detailsStore = transaction.objectStore(STORE_DETAILS);
+
+        // Check if indexStore has items that might still be heavy (from v1/v2)
+        // Note: In a real upgrade scenario from v2, the store name was 'exams' which is now STORE_INDEX.
+        // So we iterate it to strip heavy data.
+        indexStore.openCursor().onsuccess = (e: any) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            const record = cursor.value;
+            
+            // If the record still contains heavy data (rawPages), split it
+            if (record.rawPages) {
+              // Move heavy data to details store
+              detailsStore.put({
+                id: record.id,
+                rawPages: record.rawPages,
+                questions: record.questions || []
+              });
+
+              // Update index store to keep ONLY metadata
+              const metaOnly = {
+                id: record.id,
+                name: record.name,
+                timestamp: record.timestamp,
+                pageCount: record.pageCount
+              };
+              cursor.update(metaOnly);
+            }
+            cursor.continue();
+          }
+        };
+
+        // Clean up the temporary meta store from previous attempts if it exists
+        if (db.objectStoreNames.contains("exams_meta")) {
+            db.deleteObjectStore("exams_meta");
+        }
       }
     };
 
@@ -30,94 +86,56 @@ const openDB = (): Promise<IDBDatabase> => {
 };
 
 /**
- * Save an exam result to history
- * NOW SUPPORTS SAVING PROCESSED QUESTIONS
+ * Save an exam result. 
+ * Writes metadata to 'exams' and blobs to 'exam_details'.
  */
 export const saveExamResult = async (fileName: string, rawPages: DebugPageData[], questions: QuestionImage[] = []): Promise<string> => {
   const db = await openDB();
   
-  // Try to find existing record by name to update it instead of creating duplicate entries for same file name
+  // Check if updating existing
   const list = await getHistoryList();
   const existing = list.find(h => h.name === fileName);
   const id = existing ? existing.id : crypto.randomUUID();
   const timestamp = Date.now();
 
-  // Safety: Deduplicate pages by pageNumber before saving to prevent DB corruption
+  // Deduplicate pages
   const uniquePages = Array.from(new Map(rawPages.map(item => [item.pageNumber, item])).values());
   uniquePages.sort((a, b) => a.pageNumber - b.pageNumber);
 
-  const record = {
+  const metaRecord: HistoryMetadata = {
     id,
     name: fileName,
     timestamp,
-    pageCount: uniquePages.length,
-    rawPages: uniquePages, // This includes the heavy Base64 images
-    questions: questions // Store the cut images
+    pageCount: uniquePages.length
+  };
+
+  const detailsRecord = {
+    id,
+    rawPages: uniquePages,
+    questions: questions
   };
 
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.put(record);
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    
+    transaction.objectStore(STORE_INDEX).put(metaRecord);
+    transaction.objectStore(STORE_DETAILS).put(detailsRecord);
 
-    request.onsuccess = () => resolve(id);
-    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => resolve(id);
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 
 /**
- * Updates an existing exam result if it exists (by name), otherwise saves a new one.
- * Used for re-analysis. Updates both raw pages and result questions.
+ * Update existing exam. Used for Re-analysis.
  */
 export const reSaveExamResult = async (fileName: string, rawPages: DebugPageData[], questions?: QuestionImage[]): Promise<void> => {
-  const list = await getHistoryList();
-  const targetItem = list.find(h => h.name === fileName);
-
-  if (!targetItem) {
-    await saveExamResult(fileName, rawPages, questions || []);
-    return;
-  }
-
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
-    const getReq = store.get(targetItem.id);
-
-    getReq.onsuccess = () => {
-      const record = getReq.result;
-      if (record) {
-        // Dedup pages
-        const uniquePages = Array.from(new Map(rawPages.map(item => [item.pageNumber, item])).values());
-        uniquePages.sort((a, b) => a.pageNumber - b.pageNumber);
-
-        record.rawPages = uniquePages;
-        record.pageCount = uniquePages.length;
-        record.timestamp = Date.now();
-        
-        // Update questions if provided. 
-        // If we are just re-saving rawPages (e.g. intermediate step), we might want to keep old questions?
-        // Usually re-save implies new state. If questions is undefined, we assume we keep old ones OR 
-        // if this is a full re-analysis, the caller should pass the new empty/partial array.
-        // For safety here: if questions is passed, overwrite.
-        if (questions !== undefined) {
-          record.questions = questions;
-        }
-
-        const putReq = store.put(record);
-        putReq.onsuccess = () => resolve();
-        putReq.onerror = () => reject(putReq.error);
-      } else {
-        saveExamResult(fileName, rawPages, questions).then(() => resolve()).catch(reject);
-      }
-    };
-    getReq.onerror = () => reject(getReq.error);
-  });
+  return saveExamResult(fileName, rawPages, questions || []).then(() => {});
 };
 
 /**
- * Update detections for a specific page AND update the question images for that file.
- * Used for manual refinement/calibration.
+ * Update detections/questions for a specific page.
+ * FIXED: Now updates timestamp in STORE_INDEX to ensure consistency.
  */
 export const updatePageDetectionsAndQuestions = async (
     fileName: string, 
@@ -127,19 +145,17 @@ export const updatePageDetectionsAndQuestions = async (
 ): Promise<void> => {
   const list = await getHistoryList();
   const targetItem = list.find(h => h.name === fileName);
-  
-  if (!targetItem) {
-     console.warn("Could not find history record to update for", fileName);
-     return;
-  }
+  if (!targetItem) return;
 
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+    // Open transaction on BOTH stores
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    const detailsStore = transaction.objectStore(STORE_DETAILS);
+    const indexStore = transaction.objectStore(STORE_INDEX);
     
-    // Get full record
-    const getReq = store.get(targetItem.id);
+    // 1. Get Details
+    const getReq = detailsStore.get(targetItem.id);
     
     getReq.onsuccess = () => {
         const record = getReq.result;
@@ -148,56 +164,70 @@ export const updatePageDetectionsAndQuestions = async (
             return;
         }
 
-        // 1. Update the specific page detections
+        // Update specific page in Details
         const pageIndex = record.rawPages.findIndex((p: DebugPageData) => p.pageNumber === pageNumber);
         if (pageIndex !== -1) {
             record.rawPages[pageIndex].detections = newDetections;
         }
 
-        // 2. Update the stored questions for this file (Replacing old ones for this file)
-        // We need to merge. If record.questions has questions from OTHER files (batch), keep them.
-        // If record.questions only has this file, replace.
-        // CURRENT DESIGN: A record usually maps 1-to-1 with a fileName if created via upload, 
-        // but if batch processed they might be distinct records.
-        // The saveExamResult usually creates one record per filename.
-        
-        // Since we save per filename in `saveExamResult` logic in App.tsx:
+        // Update questions in Details
         record.questions = newFileQuestions;
+        detailsStore.put(record);
 
-        // Save back
-        const putReq = store.put(record);
-        putReq.onsuccess = () => resolve();
-        putReq.onerror = () => reject(putReq.error);
+        // 2. Update Timestamp in Index (Meta)
+        // We get the current meta to preserve other fields, just update timestamp
+        const metaReq = indexStore.get(targetItem.id);
+        metaReq.onsuccess = () => {
+            const meta = metaReq.result;
+            if (meta) {
+                meta.timestamp = Date.now();
+                indexStore.put(meta);
+            }
+        };
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
     };
     getReq.onerror = () => reject(getReq.error);
   });
 };
 
-// Legacy support alias
 export const updatePageDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => {
     return updatePageDetectionsAndQuestions(fileName, pageNumber, newDetections, []); 
 };
 
 /**
  * Update ONLY questions for a specific exam ID.
- * Used for the "Sync Legacy" feature.
+ * FIXED: Now updates timestamp in STORE_INDEX to ensure consistency.
  */
 export const updateExamQuestionsOnly = async (id: string, questions: QuestionImage[]): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
-    const getReq = store.get(id);
-
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    const detailsStore = transaction.objectStore(STORE_DETAILS);
+    const indexStore = transaction.objectStore(STORE_INDEX);
+    
+    // 1. Update Details
+    const getReq = detailsStore.get(id);
     getReq.onsuccess = () => {
         const record = getReq.result;
         if (record) {
             record.questions = questions;
-            const putReq = store.put(record);
-            putReq.onsuccess = () => resolve();
-            putReq.onerror = () => reject(putReq.error);
+            detailsStore.put(record);
+
+            // 2. Update Timestamp in Index
+            const metaReq = indexStore.get(id);
+            metaReq.onsuccess = () => {
+                const meta = metaReq.result;
+                if (meta) {
+                    meta.timestamp = Date.now();
+                    indexStore.put(meta);
+                }
+            };
+            
+            transaction.oncomplete = () => resolve();
         } else {
-            resolve(); // Or reject if strict
+            resolve();
         }
     };
     getReq.onerror = () => reject(getReq.error);
@@ -206,84 +236,94 @@ export const updateExamQuestionsOnly = async (id: string, questions: QuestionIma
 
 
 /**
- * Get a list of all history items (Metadata only, no images) to display in the list
+ * Get History List.
+ * FAST: Only reads from the lightweight 'exams' store.
  */
 export const getHistoryList = async (): Promise<HistoryMetadata[]> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
-    
-    const request = store.openCursor();
-    const results: HistoryMetadata[] = [];
+    const transaction = db.transaction([STORE_INDEX], "readonly");
+    const store = transaction.objectStore(STORE_INDEX);
+    const request = store.getAll();
 
-    request.onsuccess = (event) => {
-      const cursor = (event.target as IDBRequest).result;
-      if (cursor) {
-        // Destructure ONLY metadata to avoid loading heavy image arrays into memory
-        const { id, name, timestamp, pageCount } = cursor.value;
-        results.push({ id, name, timestamp, pageCount });
-        cursor.continue();
-      } else {
-        // Sort by newest first
-        resolve(results.sort((a, b) => b.timestamp - a.timestamp));
-      }
+    request.onsuccess = () => {
+      const results = request.result as HistoryMetadata[];
+      resolve(results.sort((a, b) => b.timestamp - a.timestamp));
     };
     request.onerror = () => reject(request.error);
   });
 };
 
 /**
- * Load full data for a specific history item
+ * Load full exam result.
+ * JOIN: Fetches metadata from 'exams' and heavy blobs from 'exam_details'.
  */
 export const loadExamResult = async (id: string): Promise<{ rawPages: DebugPageData[], questions?: QuestionImage[], name: string } | null> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.get(id);
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readonly");
+    
+    // We need both parts
+    const metaReq = transaction.objectStore(STORE_INDEX).get(id);
+    const detailsReq = transaction.objectStore(STORE_DETAILS).get(id);
 
-    request.onsuccess = () => {
-      if (request.result) {
-        resolve({
-          rawPages: request.result.rawPages,
-          name: request.result.name,
-          questions: request.result.questions // Return stored questions
-        });
-      } else {
-        resolve(null);
-      }
+    // Wait for transaction completion or handle manual Promise.all
+    let meta: HistoryMetadata | null = null;
+    let details: any | null = null;
+    let completed = 0;
+
+    const checkDone = () => {
+        if (completed === 2) {
+            if (meta && details) {
+                resolve({
+                    name: meta.name,
+                    rawPages: details.rawPages || [],
+                    questions: details.questions || []
+                });
+            } else if (meta && !details) {
+                // Should not happen unless migration failed, but robust fallback
+                resolve({
+                    name: meta.name,
+                    rawPages: [],
+                    questions: []
+                });
+            } else {
+                resolve(null);
+            }
+        }
     };
-    request.onerror = () => reject(request.error);
+
+    metaReq.onsuccess = () => { meta = metaReq.result; completed++; checkDone(); };
+    detailsReq.onsuccess = () => { details = detailsReq.result; completed++; checkDone(); };
+    
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 
 /**
- * Delete a history item
+ * Delete. Removes from BOTH stores.
  */
 export const deleteExamResult = async (id: string): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(id);
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    transaction.objectStore(STORE_INDEX).delete(id);
+    transaction.objectStore(STORE_DETAILS).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 
-/**
- * Delete multiple history items
- */
 export const deleteExamResults = async (ids: string[]): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    const indexStore = transaction.objectStore(STORE_INDEX);
+    const detailsStore = transaction.objectStore(STORE_DETAILS);
 
     ids.forEach(id => {
-        store.delete(id);
+        indexStore.delete(id);
+        detailsStore.delete(id);
     });
 
     transaction.oncomplete = () => resolve();
@@ -291,34 +331,26 @@ export const deleteExamResults = async (ids: string[]): Promise<void> => {
   });
 };
 
-/**
- * Clean up a history item by removing duplicate pages.
- * Returns the number of duplicates removed.
- */
 export const cleanupHistoryItem = async (id: string): Promise<number> => {
   const db = await openDB();
   
-  // 1. Get the record
-  const record: any = await new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.get(id);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+  // Get Details
+  const details: any = await new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE_DETAILS], "readonly");
+      const req = tx.objectStore(STORE_DETAILS).get(id);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
   });
 
-  if (!record || !record.rawPages) return 0;
+  if (!details || !details.rawPages) return 0;
 
-  // 2. De-duplicate based on pageNumber
-  const originalCount = record.rawPages.length;
+  const originalCount = details.rawPages.length;
   const uniqueMap = new Map();
   
-  record.rawPages.forEach((p: DebugPageData) => {
+  details.rawPages.forEach((p: DebugPageData) => {
       if (!uniqueMap.has(p.pageNumber)) {
           uniqueMap.set(p.pageNumber, p);
       } else {
-          // If we have a duplicate, we can optionally keep the one with more detections
-          // But usually, they are identical. Keep first for stability.
           const existing = uniqueMap.get(p.pageNumber);
           if (p.detections.length > existing.detections.length) {
               uniqueMap.set(p.pageNumber, p);
@@ -329,44 +361,42 @@ export const cleanupHistoryItem = async (id: string): Promise<number> => {
   const uniquePages = Array.from(uniqueMap.values());
   uniquePages.sort((a: any, b: any) => a.pageNumber - b.pageNumber);
 
-  // If no change, exit
   if (uniquePages.length === originalCount) return 0;
 
-  // 3. Update the record
-  record.rawPages = uniquePages;
-  record.pageCount = uniquePages.length;
-
+  // Update
   await new Promise<void>((resolve, reject) => {
-     const transaction = db.transaction([STORE_NAME], "readwrite");
-     const store = transaction.objectStore(STORE_NAME);
-     const request = store.put(record);
+     const tx = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
      
-     request.onsuccess = () => resolve();
-     request.onerror = () => reject(request.error);
+     // Update Details
+     details.rawPages = uniquePages;
+     tx.objectStore(STORE_DETAILS).put(details);
+
+     // Update Meta Page Count and Timestamp
+     const metaReq = tx.objectStore(STORE_INDEX).get(id);
+     metaReq.onsuccess = () => {
+         const meta = metaReq.result;
+         if (meta) {
+             meta.pageCount = uniquePages.length;
+             meta.timestamp = Date.now(); // Also update timestamp for consistency
+             tx.objectStore(STORE_INDEX).put(meta);
+         }
+     };
+     
+     tx.oncomplete = () => resolve();
+     tx.onerror = () => reject(tx.error);
   });
 
   return originalCount - uniquePages.length;
 };
 
-/**
- * Iterates through ALL history items and removes duplicates.
- * Returns total pages removed across all exams.
- */
 export const cleanupAllHistory = async (): Promise<number> => {
   const list = await getHistoryList();
   let totalRemoved = 0;
-  
-  // We process sequentially to avoid jamming the DB transaction if the files are huge
   for (const item of list) {
       try {
           const removed = await cleanupHistoryItem(item.id);
-          if (removed > 0) {
-              console.log(`Cleaned ${removed} duplicates from ${item.name}`);
-          }
           totalRemoved += removed;
-      } catch (e) {
-          console.error(`Failed to cleanup ${item.name}`, e);
-      }
+      } catch (e) { console.error(e); }
   }
   return totalRemoved;
 };

@@ -34,6 +34,7 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
           // Callers will need to refresh list manually if needed
           if (removedCount > 0) {
               setDetailedStatus(`Maintenance complete. Cleaned ${removedCount} duplicate pages.`);
+              await refreshHistoryList(); // Refresh list to show updated page counts
           } else {
               setDetailedStatus(`Maintenance complete. No duplicate pages found.`);
           }
