@@ -54,9 +54,9 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
       let processedFiles = 0;
       let changedImagesCount = 0;
 
-      // Use Batch Process Size for local processing parallelism
-      // Concurrency setting is reserved for Gemini API calls
-      const runConcurrency = Math.max(1, batchSize || 5);
+      // Use Batch Process Size for local processing parallelism if available, otherwise default to 3.
+      // Respect user's need for concurrency, but ensure it's not 1 unless explicitly set.
+      const runConcurrency = state.batchSize ? Math.max(2, state.batchSize) : 3;
 
       try {
          setDetailedStatus(`Batch Reprocessing: 0% (0/${totalFiles})`);
@@ -104,6 +104,10 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
             processedFiles++;
             const percent = Math.round((processedFiles / totalFiles) * 100);
             setDetailedStatus(`Batch Reprocessing: ${percent}% (${processedFiles}/${totalFiles})`);
+            
+            // Critical: Yield to event loop to allow UI render between items in the concurrency pool.
+            // This ensures "Real-time" updates even when CPU is busy.
+            await new Promise(resolve => setTimeout(resolve, 0));
 
          }, runConcurrency);
 
@@ -190,7 +194,7 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
     setDetailedStatus(`Queuing ${ids.length} exams from history...`);
 
     try {
-      const CHUNK_SIZE = batchSize;
+      const CHUNK_SIZE = batchSize || 10;
       const combinedPages: DebugPageData[] = [];
       const combinedQuestions: QuestionImage[] = [];
       const legacyFilesFound = new Set<string>();
