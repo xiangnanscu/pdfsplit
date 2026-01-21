@@ -41,9 +41,6 @@ export const useExamState = () => {
   const [lastViewedFile, setLastViewedFile] = useState<string | null>(null);
   const [refiningFile, setRefiningFile] = useState<string | null>(null);
 
-  // ID context for lazy loading
-  const [currentExamId, setCurrentExamId] = useState<string | null>(null);
-
   // Legacy sync
   const [legacySyncFiles, setLegacySyncFiles] = useState<Set<string>>(new Set());
   const [isSyncingLegacy, setIsSyncingLegacy] = useState(false);
@@ -176,7 +173,6 @@ export const useExamState = () => {
     setNotifications([]);
     setLegacySyncFiles(new Set());
     setIsSyncingLegacy(false);
-    setCurrentExamId(null); // Reset current ID
     if (window.location.search) window.history.pushState({}, '', window.location.pathname);
   };
 
@@ -194,16 +190,14 @@ export const useExamState = () => {
       legacySyncFiles, isSyncingLegacy, processingFiles, notifications, showHistory,
       historyList, isLoadingHistory, cropSettings, concurrency, batchSize, selectedModel,
       useHistoryCache, progress, total, completedCount, error, detailedStatus,
-      croppingTotal, croppingDone, currentRound, failedCount, startTime, elapsedTime,
-      currentExamId
+      croppingTotal, croppingDone, currentRound, failedCount, startTime, elapsedTime
     },
     setters: {
       setStatus, setQuestions, setRawPages, setSourcePages, setDebugFile, setLastViewedFile, setRefiningFile,
       setLegacySyncFiles, setIsSyncingLegacy, setProcessingFiles, setNotifications, setShowHistory,
       setHistoryList, setIsLoadingHistory, setCropSettings, setConcurrency, setBatchSize, setSelectedModel,
       setUseHistoryCache, setProgress, setTotal, setCompletedCount, setError, setDetailedStatus,
-      setCroppingTotal, setCroppingDone, setCurrentRound, setFailedCount, setStartTime, setElapsedTime,
-      setCurrentExamId
+      setCroppingTotal, setCroppingDone, setCurrentRound, setFailedCount, setStartTime, setElapsedTime
     },
     refs: {
       abortControllerRef,

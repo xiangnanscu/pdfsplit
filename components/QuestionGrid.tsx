@@ -4,7 +4,6 @@ import JSZip from 'jszip';
 import * as ReactWindow from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { QuestionImage, DebugPageData } from '../types';
-import { getQuestionImage, getQuestionOriginalImage } from '../services/storageService';
 
 interface Props {
   questions: QuestionImage[];
@@ -12,14 +11,13 @@ interface Props {
   onDebug: (fileName: string) => void;
   onRefine: (fileName: string) => void;
   lastViewedFile?: string | null;
-  currentExamId?: string | null; // Passed to enable DB lazy loading
 }
 
 interface RowData {
   type: 'header' | 'grid';
   fileName: string;
-  items: QuestionImage[];
-  startIndex: number;
+  items: QuestionImage[]; // For 'grid' type
+  startIndex: number; // Index of the first item in this row within the file's list
   totalInFile: number;
 }
 
@@ -32,9 +30,9 @@ interface ItemDataProps {
   zippingFile: string | null;
   zippingProgress: string;
   setSelectedImage: (img: QuestionImage) => void;
-  currentExamId?: string | null;
 }
 
+// Manually define ListChildComponentProps to avoid import errors
 interface ListChildComponentProps {
   index: number;
   style: CSSProperties;
@@ -42,69 +40,11 @@ interface ListChildComponentProps {
   isScrolling?: boolean;
 }
 
-/**
- * Lazy Image Component
- * Loads from DB if dataUrl is missing, otherwise uses provided dataUrl.
- */
-const LazyImage: React.FC<{ 
-    question: QuestionImage; 
-    examId?: string | null; 
-    className?: string;
-    onClick?: () => void;
-}> = ({ question, examId, className, onClick }) => {
-    const [src, setSrc] = useState<string | undefined>(question.dataUrl);
-    const [isLoading, setIsLoading] = useState(!question.dataUrl);
-
-    useEffect(() => {
-        // If we already have src, do nothing
-        if (src) return;
-        
-        // If we have no examId, we can't fetch
-        if (!examId) return;
-
-        let active = true;
-        
-        getQuestionImage(examId, question.fileName, question.id)
-            .then(data => {
-                if (active && data) {
-                    setSrc(data);
-                    setIsLoading(false);
-                } else if (active) {
-                    setIsLoading(false); // Failed or empty
-                }
-            })
-            .catch(() => {
-                if (active) setIsLoading(false);
-            });
-
-        return () => { active = false; };
-    }, [question.id, question.fileName, examId, src]);
-
-    if (isLoading) {
-        return (
-            <div className={`flex items-center justify-center bg-slate-50 text-slate-300 ${className}`}>
-                 <svg className="w-8 h-8 animate-pulse" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            </div>
-        );
-    }
-
-    return (
-        <img 
-            src={src} 
-            alt={`Q${question.id}`} 
-            className={className} 
-            loading="lazy" 
-            onClick={onClick}
-        />
-    );
-};
-
-
 const ROW_HEIGHT_HEADER = 100;
 const ROW_HEIGHT_GRID = 360;
 
 const VirtualRow = ({ index, style, data }: ListChildComponentProps) => {
-  const { rows, columns, onDebug, onRefine, generateZip, zippingFile, zippingProgress, setSelectedImage, currentExamId } = data;
+  const { rows, columns, onDebug, onRefine, generateZip, zippingFile, zippingProgress, setSelectedImage } = data;
   const row = rows[index];
 
   if (row.type === 'header') {
@@ -155,20 +95,22 @@ const VirtualRow = ({ index, style, data }: ListChildComponentProps) => {
            >
               <div className="px-4 py-2 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Q{q.id}</span>
-                  {(q.originalDataUrl || currentExamId) && <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>}
+                  {q.originalDataUrl && <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>}
               </div>
               <div 
                   className="p-4 flex items-center justify-center flex-grow cursor-zoom-in relative bg-white"
                   onClick={() => setSelectedImage(q)}
               >
-                  <LazyImage 
-                    question={q}
-                    examId={currentExamId}
+                  <img 
+                    src={q.dataUrl} 
+                    alt={`Q${q.id}`} 
                     className="max-w-full max-h-[260px] w-auto h-auto object-contain transition-transform duration-300 group-hover:scale-105"
+                    loading="lazy"
                   />
               </div>
            </div>
         ))}
+        {/* Fill empty cells to maintain grid structure visually if needed */}
         {Array.from({ length: columns - row.items.length }).map((_, i) => (
           <div key={`empty-${i}`} />
         ))}
@@ -177,50 +119,15 @@ const VirtualRow = ({ index, style, data }: ListChildComponentProps) => {
   );
 };
 
-export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, onRefine, lastViewedFile, currentExamId }) => {
+export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, onRefine, lastViewedFile }) => {
   const [zippingFile, setZippingFile] = useState<string | null>(null);
   const [zippingProgress, setZippingProgress] = useState<string>('');
   const [selectedImage, setSelectedImage] = useState<QuestionImage | null>(null);
-  
-  // For Modal: If lazy loading, we need to fetch the full data for the modal
-  const [modalImageData, setModalImageData] = useState<{ final: string, original?: string } | null>(null);
   const [showOriginal, setShowOriginal] = useState(false); 
 
+  // Cast imports to any to bypass type errors in some environments
   const List = (ReactWindow as any).VariableSizeList || (ReactWindow as any).default?.VariableSizeList;
   const AutoSizerAny = AutoSizer as any;
-
-  // Modal Image Loader
-  useEffect(() => {
-    if (!selectedImage) {
-        setModalImageData(null);
-        return;
-    }
-    
-    // If data is present, use it
-    if (selectedImage.dataUrl) {
-        setModalImageData({
-            final: selectedImage.dataUrl,
-            original: selectedImage.originalDataUrl
-        });
-        return;
-    }
-
-    // Else fetch from DB
-    if (currentExamId) {
-        Promise.all([
-            getQuestionImage(currentExamId, selectedImage.fileName, selectedImage.id),
-            getQuestionOriginalImage(currentExamId, selectedImage.fileName, selectedImage.id)
-        ]).then(([final, orig]) => {
-            if (final) {
-                setModalImageData({
-                    final,
-                    original: orig || selectedImage.originalDataUrl
-                });
-            }
-        });
-    }
-  }, [selectedImage, currentExamId]);
-
 
   const groupedQuestions = useMemo(() => {
     const groups: Record<string, QuestionImage[]> = {};
@@ -234,11 +141,13 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
   }, [questions]);
 
   const sortedFileNames = useMemo(() => {
+    // Default Sorting: Alphabetical (Numeric aware for File 1, File 2, File 10)
     return Object.keys(groupedQuestions).sort((a, b) => 
         a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
     );
   }, [groupedQuestions]);
 
+  // Handle Modal Navigation
   const handleNext = useCallback(() => {
     if (!selectedImage) return;
     const currentIndex = questions.indexOf(selectedImage);
@@ -268,7 +177,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedImage, handleNext, handlePrev]);
 
-  // ZIP Generation Logic - NEEDS to handle lazy loading now
+  // ZIP Generation Logic
   const generateZip = async (targetFileName?: string) => {
     if (questions.length === 0) return;
     const fileNames = targetFileName ? [targetFileName] : Object.keys(groupedQuestions);
@@ -291,71 +200,50 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
         const folder = isBatch ? zip.folder(fileName) : zip;
         if (!folder) continue;
 
+        // OPTIMIZATION: Create a lightweight copy of rawPages for JSON without the Base64 images
         const lightweightRawPages = fileRawPages.map(({ dataUrl, ...rest }) => rest);
         folder.file("analysis_data.json", JSON.stringify(lightweightRawPages, null, 2));
         
-        // TODO: For pages, if we really wanted to zip them, we'd need to fetch them from DB too.
-        // Current logic assumes rawPages has dataUrl if freshly processed.
-        // If loaded from history (lazy), rawPages[i].dataUrl is undefined.
-        // We need to fetch.
-        
-        // This is a heavy operation. We should inform the user or fetch strictly on demand.
-        // For now, let's try to fetch if missing.
-        
         const fullPagesFolder = folder.folder("full_pages");
-        /* eslint-disable no-await-in-loop */
-        for (const page of fileRawPages) {
-            let dataUrl = page.dataUrl;
-            if (!dataUrl && currentExamId) {
-                // Fetch from DB
-                // @ts-ignore
-                const fetched = await import('../services/storageService').then(m => m.getPageImage(currentExamId, fileName, page.pageNumber));
-                if (fetched) dataUrl = fetched;
-            }
-
-            if (dataUrl) {
-                const base64Data = dataUrl.split(',')[1];
-                fullPagesFolder?.file(`Page_${page.pageNumber}.jpg`, base64Data, { 
-                    base64: true, compression: "STORE" 
-                });
-            }
-        }
+        fileRawPages.forEach((page) => {
+          const base64Data = page.dataUrl.split(',')[1];
+          // OPTIMIZATION: Use STORE compression for JPEGs to avoid CPU waste
+          fullPagesFolder?.file(`Page_${page.pageNumber}.jpg`, base64Data, { 
+              base64: true,
+              compression: "STORE" 
+          });
+        });
 
         const usedNames = new Set<string>();
-        for (const q of fileQs) {
-            let dataUrl = q.dataUrl;
-             if (!dataUrl && currentExamId) {
-                // Fetch from DB
-                const fetched = await getQuestionImage(currentExamId, fileName, q.id);
-                if (fetched) dataUrl = fetched;
-            }
-
-            if (dataUrl) {
-                const base64Data = dataUrl.split(',')[1];
-                let finalName = `${q.fileName}_Q${q.id}.jpg`;
-                if (usedNames.has(finalName)) {
-                    let counter = 1;
-                    const baseName = `${q.fileName}_Q${q.id}`;
-                    while(usedNames.has(`${baseName}_${counter}.jpg`)) counter++;
-                    finalName = `${baseName}_${counter}.jpg`;
-                }
-                usedNames.add(finalName);
-                folder.file(finalName, base64Data, { 
-                    base64: true, compression: "STORE" 
-                });
-            }
-        }
-        /* eslint-enable no-await-in-loop */
+        fileQs.forEach((q) => {
+          const base64Data = q.dataUrl.split(',')[1];
+          let finalName = `${q.fileName}_Q${q.id}.jpg`;
+          if (usedNames.has(finalName)) {
+             let counter = 1;
+             const baseName = `${q.fileName}_Q${q.id}`;
+             while(usedNames.has(`${baseName}_${counter}.jpg`)) counter++;
+             finalName = `${baseName}_${counter}.jpg`;
+          }
+          usedNames.add(finalName);
+          // OPTIMIZATION: Use STORE compression for JPEGs
+          folder.file(finalName, base64Data, { 
+              base64: true,
+              compression: "STORE" 
+          });
+        });
 
         processedCount++;
         if (!targetFileName) {
             setZippingProgress(`Preparing ${processedCount}/${totalCount}`);
+            // Yield to main thread briefly
             await new Promise(resolve => setTimeout(resolve, 0));
         }
       }
 
       setZippingProgress(targetFileName ? 'Packaging...' : 'Packaging 0%');
 
+      // OPTIMIZATION: Use STORE compression globally for speed (10-50x faster for JPEGs)
+      // JSZip is single-threaded, avoiding DEFLATE calculation is the only way to "parallel-like" speeds.
       const content = await zip.generateAsync({ 
         type: "blob",
         compression: "STORE"
@@ -363,6 +251,8 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
           setZippingProgress(`Packaging ${metadata.percent.toFixed(0)}%`);
       });
       
+      // FIX: Phase 3 Handoff Lag
+      // The button used to reset immediately here, confusing users while browser prepared the download.
       setZippingProgress('Browser preparing download...');
       
       const url = window.URL.createObjectURL(content);
@@ -374,6 +264,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
       document.body.appendChild(link);
       link.click();
       
+      // Give visual feedback that the action was taken, preventing premature reset
       setZippingProgress('Download starting...');
       await new Promise(resolve => setTimeout(resolve, 4000));
 
@@ -381,6 +272,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error("ZIP Error:", err);
+      // Alert removed to prevent sandbox errors
     } finally {
       setZippingFile(null);
       setZippingProgress('');
@@ -410,10 +302,13 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
             <div className="flex gap-3">
               <button 
                   onClick={() => {
+                     // Prioritize lastViewedFile if available
                      if (lastViewedFile) {
                          onDebug(lastViewedFile);
                          return;
                      }
+
+                     // Get the first available file to start debugging (using sorted order)
                      if (sortedFileNames.length > 0) onDebug(sortedFileNames[0]);
                   }}
                   className="group px-6 py-3 rounded-xl font-black transition-all flex items-center justify-center gap-2 shadow-lg min-w-[160px] tracking-tight uppercase text-xs bg-slate-800 text-white hover:bg-slate-700 active:scale-95"
@@ -446,16 +341,19 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
         <div className="flex-1 min-h-0 bg-slate-50/50">
           <AutoSizerAny>
             {({ height, width }: { height: number; width: number }) => {
+              // Determine columns based on width
               let columns = 1;
               if (width >= 640) columns = 2;
               if (width >= 1024) columns = 3;
               if (width >= 1280) columns = 4;
               if (width >= 1536) columns = 5;
 
+              // Compute virtual rows flattened from sorted groups
               const rows: RowData[] = [];
               sortedFileNames.forEach((fileName) => {
                 const fileQs = groupedQuestions[fileName];
                 
+                // Header Row
                 rows.push({
                   type: 'header',
                   fileName,
@@ -464,6 +362,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                   totalInFile: fileQs.length
                 });
 
+                // Grid Rows
                 for (let i = 0; i < fileQs.length; i += columns) {
                   rows.push({
                     type: 'grid',
@@ -489,8 +388,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                     generateZip,
                     zippingFile,
                     zippingProgress,
-                    setSelectedImage,
-                    currentExamId
+                    setSelectedImage
                   }}
                 >
                   {VirtualRow}
@@ -507,9 +405,34 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
           className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/95 backdrop-blur-md transition-opacity animate-[fade-in_0.2s_ease-out]"
           onClick={() => setSelectedImage(null)}
         >
-           {/* Navigation Arrows Code Omitted for Brevity (Same as before) */}
-           {/* ... */}
-           
+          {hasPrev && (
+            <button
+              className="absolute left-6 top-1/2 -translate-y-1/2 p-5 text-white/40 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePrev();
+              }}
+            >
+              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+
+          {hasNext && (
+            <button
+              className="absolute right-6 top-1/2 -translate-y-1/2 p-5 text-white/40 hover:text-white hover:bg-white/10 rounded-full transition-all z-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleNext();
+              }}
+            >
+              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
+
           <div className="relative max-w-7xl w-full h-[95vh] flex flex-col items-center justify-center p-6 md:px-16 md:py-10" onClick={(e) => e.stopPropagation()}>
             <div className="w-full flex justify-between items-center text-white mb-6">
                <div className="flex flex-col">
@@ -528,7 +451,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
             
             <div className="flex-1 w-full bg-white rounded-3xl overflow-hidden shadow-2xl relative flex flex-col">
               <div className="relative w-full h-full bg-slate-50 flex items-center justify-center p-12 overflow-auto">
-                {modalImageData?.original && (
+                {selectedImage.originalDataUrl && (
                   <div className="absolute top-6 left-6 z-20">
                     <button 
                       onMouseDown={() => setShowOriginal(true)}
@@ -548,35 +471,26 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                     </button>
                   </div>
                 )}
-                {modalImageData ? (
-                    <img 
-                    src={showOriginal && modalImageData.original ? modalImageData.original : modalImageData.final} 
-                    alt={`Full size Question ${selectedImage.id}`} 
-                    className={`max-h-full max-w-full object-contain shadow-2xl transition-all duration-300 ${showOriginal ? 'ring-8 ring-blue-500/20' : ''}`}
-                    />
-                ) : (
-                    <div className="flex flex-col items-center gap-2">
-                        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">Loading High-Res Image...</span>
-                    </div>
-                )}
+                <img 
+                  src={showOriginal && selectedImage.originalDataUrl ? selectedImage.originalDataUrl : selectedImage.dataUrl} 
+                  alt={`Full size Question ${selectedImage.id}`} 
+                  className={`max-h-full max-w-full object-contain shadow-2xl transition-all duration-300 ${showOriginal ? 'ring-8 ring-blue-500/20' : ''}`}
+                />
               </div>
             </div>
             
-             <div className="mt-8 flex items-center justify-between w-full max-w-5xl">
+            <div className="mt-8 flex items-center justify-between w-full max-w-5xl">
               <span className="text-white/30 text-[10px] font-black uppercase tracking-[0.3em]">Arrows to navigate • Esc to close</span>
-              {modalImageData?.final && (
-                <a 
-                    href={modalImageData.final} 
-                    download={`${selectedImage.fileName}_Q${selectedImage.id}.jpg`}
-                    className="bg-white text-slate-950 px-8 py-3.5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all flex items-center gap-3 active:scale-95 shadow-2xl shadow-white/5"
-                >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Download Image
-                </a>
-              )}
+              <a 
+                 href={selectedImage.dataUrl} 
+                 download={`${selectedImage.fileName}_Q${selectedImage.id}.jpg`}
+                 className="bg-white text-slate-950 px-8 py-3.5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all flex items-center gap-3 active:scale-95 shadow-2xl shadow-white/5"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download Image
+              </a>
             </div>
           </div>
         </div>

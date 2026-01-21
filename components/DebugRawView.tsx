@@ -4,7 +4,6 @@ import { DebugPageData, QuestionImage, DetectedQuestion } from '../types';
 import { DebugToolbar } from './debug/DebugToolbar';
 import { DebugPageViewer } from './debug/DebugPageViewer';
 import { DebugInspectorPanel } from './debug/DebugInspectorPanel';
-import { getPageImage } from '../services/storageService';
 
 interface Props {
   pages: DebugPageData[];
@@ -22,7 +21,6 @@ interface Props {
   processingFiles: Set<string>;
   currentFileIndex: number;
   totalFiles: number;
-  currentExamId?: string | null; // Added optional prop
 }
 
 export const DebugRawView: React.FC<Props> = ({ 
@@ -40,60 +38,19 @@ export const DebugRawView: React.FC<Props> = ({
   isGlobalProcessing = false,
   processingFiles,
   currentFileIndex,
-  totalFiles,
-  currentExamId
+  totalFiles
 }) => {
+  // Key format: "fileName||pageNumber||detIndex"
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  // Dragging State
+  // Dragging State for Crop Lines (Shared with sub-components)
   const [draggingSide, setDraggingSide] = useState<'left' | 'right' | 'top' | 'bottom' | null>(null);
   const [dragValue, setDragValue] = useState<number | null>(null);
   
   // Panel Resizing State
-  const [leftPanelWidth, setLeftPanelWidth] = useState(70); 
+  const [leftPanelWidth, setLeftPanelWidth] = useState(70); // Initial 70%
   const [isResizingPanel, setIsResizingPanel] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Lazy Loading State
-  const [hydratedPages, setHydratedPages] = useState<DebugPageData[]>(pages);
-  const [isLoadingImages, setIsLoadingImages] = useState(false);
-
-  // Effect: Hydrate pages when title/file changes
-  useEffect(() => {
-    // If pages already have dataUrl, use them directly
-    if (pages.length > 0 && pages[0].dataUrl) {
-        setHydratedPages(pages);
-        setIsLoadingImages(false);
-        return;
-    }
-
-    if (!currentExamId || !title) {
-        setHydratedPages(pages); // Fallback to skeleton
-        return;
-    }
-
-    // Lazy Load
-    setIsLoadingImages(true);
-    let active = true;
-
-    const loadImages = async () => {
-        const promises = pages.map(async (p) => {
-            if (p.dataUrl) return p;
-            const url = await getPageImage(currentExamId, p.fileName, p.pageNumber);
-            return { ...p, dataUrl: url || '' }; // Return with loaded URL
-        });
-        
-        const loaded = await Promise.all(promises);
-        if (active) {
-            setHydratedPages(loaded);
-            setIsLoadingImages(false);
-        }
-    };
-
-    loadImages();
-
-    return () => { active = false; };
-  }, [pages, title, currentExamId]);
 
   // Check if current file is processing
   const isCurrentFileProcessing = useMemo(() => {
@@ -118,15 +75,14 @@ export const DebugRawView: React.FC<Props> = ({
     const pageNum = parseInt(parts[1], 10);
     const detIdx = parseInt(parts[2], 10);
 
-    // Use hydrated pages here
-    const page = hydratedPages.find(p => p.fileName === fileName && p.pageNumber === pageNum);
+    const page = pages.find(p => p.fileName === fileName && p.pageNumber === pageNum);
     if (!page) return { selectedImage: null, selectedDetection: null, pageDetections: [], selectedIndex: -1 };
 
     const detectionRaw = page.detections[detIdx];
     const detection = detectionRaw ? { ...detectionRaw, pageNumber: pageNum, fileName } : null;
 
     let effectiveId: string | null = null;
-    const filePages = hydratedPages.filter(p => p.fileName === fileName).sort((a,b) => a.pageNumber - b.pageNumber);
+    const filePages = pages.filter(p => p.fileName === fileName).sort((a,b) => a.pageNumber - b.pageNumber);
     let found = false;
     for (const p of filePages) {
         for (let i = 0; i < p.detections.length; i++) {
@@ -145,7 +101,7 @@ export const DebugRawView: React.FC<Props> = ({
     const image = effectiveId ? questions.find(q => q.fileName === fileName && q.id === effectiveId) || null : null;
 
     return { selectedImage: image, selectedDetection: detection, pageDetections: page.detections, selectedIndex: detIdx };
-  }, [selectedKey, hydratedPages, questions]);
+  }, [selectedKey, pages, questions]);
 
   // Column Group Logic
   const columnInfo = useMemo(() => {
@@ -188,8 +144,8 @@ export const DebugRawView: React.FC<Props> = ({
   // Selected Page Data Helper
   const selectedPageData = useMemo(() => {
     if (!selectedDetection) return undefined;
-    return hydratedPages.find(p => p.fileName === selectedDetection.fileName && p.pageNumber === selectedDetection.pageNumber);
-  }, [hydratedPages, selectedDetection]);
+    return pages.find(p => p.fileName === selectedDetection.fileName && p.pageNumber === selectedDetection.pageNumber);
+  }, [pages, selectedDetection]);
 
   // --- Resizing Logic ---
   const startResizing = useCallback((e: React.MouseEvent) => {
@@ -287,6 +243,7 @@ export const DebugRawView: React.FC<Props> = ({
       };
   }, [draggingSide, handleGlobalMouseUp]);
 
+  // Escape Key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -324,18 +281,9 @@ export const DebugRawView: React.FC<Props> = ({
       />
 
       <div className="flex-1 flex overflow-hidden relative" ref={containerRef}>
-        {isLoadingImages && (
-            <div className="absolute inset-0 z-[80] bg-slate-900/50 flex items-center justify-center">
-                 <div className="flex flex-col items-center gap-2">
-                    <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-white font-bold text-sm">Loading Full Pages...</span>
-                 </div>
-            </div>
-        )}
-        
         <DebugPageViewer 
            width={leftPanelWidth}
-           pages={hydratedPages} 
+           pages={pages}
            selectedKey={selectedKey}
            onSelectKey={setSelectedKey}
            selectedDetection={selectedDetection}
@@ -354,6 +302,7 @@ export const DebugRawView: React.FC<Props> = ({
            onTriggerPrevFile={() => onPrevFile && onPrevFile()}
         />
 
+        {/* Resizer Handle */}
         <div
             className={`w-2 bg-slate-950 hover:bg-blue-600 cursor-col-resize relative z-[60] flex items-center justify-center transition-colors border-l border-r border-slate-800 flex-none select-none ${isResizingPanel ? 'bg-blue-600' : ''}`}
             onMouseDown={startResizing}

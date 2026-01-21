@@ -242,7 +242,6 @@ const App: React.FC = () => {
                 processingFiles={state.processingFiles}
                 currentFileIndex={currentFileIndex + 1}
                 totalFiles={uniqueFileNames.length}
-                currentExamId={state.currentExamId} // Pass ID for lazy loading
             />
         )}
 
@@ -253,7 +252,6 @@ const App: React.FC = () => {
                 onDebug={(fileName) => updateDebugFile(fileName)}
                 onRefine={(fileName) => setters.setRefiningFile(fileName)}
                 lastViewedFile={state.lastViewedFile}
-                currentExamId={state.currentExamId} // Pass ID for lazy loading
             />
         )}
 
