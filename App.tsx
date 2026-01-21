@@ -48,6 +48,7 @@ const App: React.FC = () => {
   });
 
   const [zippingFile, setZippingFile] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Load History List on Mount using the hook action
   useEffect(() => {
@@ -256,6 +257,18 @@ const App: React.FC = () => {
 
   return (
     <div className={`min-h-screen px-4 md:px-8 bg-slate-50 relative transition-all duration-300 pb-32`}>
+      
+      {/* Floating Settings Button - Always Visible */}
+      <div className="fixed top-6 right-6 z-[100]">
+        <button 
+          onClick={() => setShowSettings(true)}
+          className="w-12 h-12 bg-white text-slate-700 rounded-2xl shadow-xl shadow-slate-200 border border-slate-200 hover:text-blue-600 hover:scale-105 transition-all flex items-center justify-center group"
+          title="Settings"
+        >
+          <svg className="w-6 h-6 group-hover:rotate-45 transition-transform duration-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c-.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        </button>
+      </div>
+
       <Header 
         onShowHistory={() => setters.setShowHistory(true)} 
         onReset={actions.resetState} 
@@ -266,19 +279,6 @@ const App: React.FC = () => {
         {showInitialUI && (
           <div className="space-y-8 animate-fade-in">
             <UploadSection onFileChange={handleFileChange} />
-            
-            <ConfigurationPanel 
-              selectedModel={state.selectedModel}
-              setSelectedModel={setters.setSelectedModel}
-              concurrency={state.concurrency}
-              setConcurrency={setters.setConcurrency}
-              cropSettings={state.cropSettings}
-              setCropSettings={setters.setCropSettings}
-              useHistoryCache={state.useHistoryCache}
-              setUseHistoryCache={setters.setUseHistoryCache}
-              batchSize={state.batchSize}
-              setBatchSize={setters.setBatchSize}
-            />
           </div>
         )}
 
@@ -393,6 +393,21 @@ const App: React.FC = () => {
         onBatchLoadHistory={handleBatchLoadHistory}
         onRefreshList={refreshHistoryList}
         onCleanupAll={handleCleanupAllHistory}
+      />
+
+      <ConfigurationPanel 
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        selectedModel={state.selectedModel}
+        setSelectedModel={setters.setSelectedModel}
+        concurrency={state.concurrency}
+        setConcurrency={setters.setConcurrency}
+        cropSettings={state.cropSettings}
+        setCropSettings={setters.setCropSettings}
+        useHistoryCache={state.useHistoryCache}
+        setUseHistoryCache={setters.setUseHistoryCache}
+        batchSize={state.batchSize}
+        setBatchSize={setters.setBatchSize}
       />
       
       {state.refiningFile && (
