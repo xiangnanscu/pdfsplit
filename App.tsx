@@ -341,6 +341,7 @@ const App: React.FC = () => {
                 processingFiles={state.processingFiles}
                 currentFileIndex={currentFileIndex + 1}
                 totalFiles={sortedFileNames.length}
+                cropSettings={state.cropSettings}
             />
         ) : (
              state.status === ProcessingStatus.COMPLETED && sortedFileNames.length > 0 && (
@@ -423,7 +424,10 @@ const App: React.FC = () => {
           initialSettings={state.cropSettings}
           status={state.status}
           onClose={() => setters.setRefiningFile(null)}
-          onApply={handleRecropFile}
+          onApply={(fileName, settings) => {
+             handleRecropFile(fileName, settings);
+             setters.setCropSettings(settings); // Sync global settings to update preview immediately
+          }}
         />
       )}
 

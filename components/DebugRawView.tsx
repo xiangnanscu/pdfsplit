@@ -4,6 +4,7 @@ import { DebugPageData, QuestionImage, DetectedQuestion } from '../types';
 import { DebugToolbar } from './debug/DebugToolbar';
 import { DebugPageViewer } from './debug/DebugPageViewer';
 import { DebugInspectorPanel } from './debug/DebugInspectorPanel';
+import { CropSettings } from '../services/pdfService';
 
 interface Props {
   pages: DebugPageData[];
@@ -24,6 +25,7 @@ interface Props {
   processingFiles: Set<string>;
   currentFileIndex: number;
   totalFiles: number;
+  cropSettings: CropSettings;
 }
 
 export const DebugRawView: React.FC<Props> = ({ 
@@ -44,7 +46,8 @@ export const DebugRawView: React.FC<Props> = ({
   isGlobalProcessing = false,
   processingFiles,
   currentFileIndex,
-  totalFiles
+  totalFiles,
+  cropSettings
 }) => {
   // Key format: "fileName||pageNumber||detIndex"
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -328,6 +331,7 @@ export const DebugRawView: React.FC<Props> = ({
             draggingSide={draggingSide}
             dragValue={dragValue}
             columnInfo={columnInfo}
+            cropSettings={cropSettings}
         />
       </div>
     </div>

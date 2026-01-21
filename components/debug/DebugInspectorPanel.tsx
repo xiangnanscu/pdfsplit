@@ -2,14 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { DetectedQuestion, QuestionImage, DebugPageData } from '../../types';
 import { generateDebugPreviews, CropSettings } from '../../services/pdfService';
-import { DEFAULT_SETTINGS } from '../../hooks/useExamState';
-
-const DEBUG_CROP_SETTINGS: CropSettings = {
-  cropPadding: DEFAULT_SETTINGS.cropPadding,
-  canvasPadding: DEFAULT_SETTINGS.canvasPadding,
-  mergeOverlap: -5,
-  debugExportPadding: 0
-};
 
 interface Props {
   width: number;
@@ -20,6 +12,7 @@ interface Props {
   draggingSide: 'left' | 'right' | 'top' | 'bottom' | null;
   dragValue: number | null;
   columnInfo: { indices: number[]; initialLeft: number; initialRight: number } | null;
+  cropSettings: CropSettings;
 }
 
 export const DebugInspectorPanel: React.FC<Props> = ({
@@ -30,7 +23,8 @@ export const DebugInspectorPanel: React.FC<Props> = ({
   isProcessing,
   draggingSide,
   dragValue,
-  columnInfo
+  columnInfo,
+  cropSettings
 }) => {
   const [stages, setStages] = useState<{ stage1: string, stage2: string, stage3: string, stage4: string } | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -51,24 +45,12 @@ export const DebugInspectorPanel: React.FC<Props> = ({
            boxes = [boxes];
         }
 
-        // We use current default settings for preview unless specific ones were saved/passed down
-        // For accurate visual debugging, we should ideally use the settings associated with the file
-        // but passing settings down through props is complex. Using defaults for now or reading from store if available.
-        // Assuming global defaults for visualization consistency.
-        
-        // Retrieve settings from local storage to match what was likely used
-        let settings = DEBUG_CROP_SETTINGS;
-        try {
-            const saved = localStorage.getItem('exam_splitter_crop_settings_v3');
-            if (saved) settings = JSON.parse(saved);
-        } catch {}
-
         const result = await generateDebugPreviews(
           pageData.dataUrl,
           boxes as [number, number, number, number][],
           pageData.width,
           pageData.height,
-          settings
+          cropSettings
         );
 
         setStages(result);
@@ -80,7 +62,7 @@ export const DebugInspectorPanel: React.FC<Props> = ({
     };
 
     generatePreviews();
-  }, [selectedDetection, pageData]);
+  }, [selectedDetection, pageData, cropSettings]);
 
   const PreviewCard = ({ title, url, color, desc }: { title: string, url?: string, color: string, desc: string }) => (
      <div className="space-y-2">
