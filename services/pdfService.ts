@@ -1,7 +1,7 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
-import { getTrimmedBounds, trimWhitespace, isContained } from '../shared/canvas-utils.js';
+import { getTrimmedBounds, trimWhitespace, isContained, checkCanvasEdges } from '../shared/canvas-utils.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
 
@@ -118,17 +118,44 @@ export const constructQuestionCanvas = (
       const processedFragments = finalBoxes.map((box, idx) => {
         const [ymin, xmin, ymax, xmax] = box;
 
-        // Calculate raw crop coordinates
-        const x = Math.max(0, (xmin / 1000) * originalWidth - CROP_PADDING);
-        const y = Math.max(0, (ymin / 1000) * originalHeight - CROP_PADDING);
-        const rawW = ((xmax - xmin) / 1000) * originalWidth + (CROP_PADDING * 2);
-        const rawH = ((ymax - ymin) / 1000) * originalHeight + (CROP_PADDING * 2);
+        // --- START NEW INTELLIGENT PADDING LOGIC ---
+        // 1. Analyze Raw Box Edges first to decide intelligent padding
+        const uX = Math.floor((xmin / 1000) * originalWidth);
+        const uY = Math.floor((ymin / 1000) * originalHeight);
+        const uW = Math.ceil(((xmax - xmin) / 1000) * originalWidth);
+        const uH = Math.ceil(((ymax - ymin) / 1000) * originalHeight);
+
+        let pTop = CROP_PADDING;
+        let pBottom = CROP_PADDING;
+        let pLeft = CROP_PADDING;
+        let pRight = CROP_PADDING;
+
+        // Only check valid dimensions
+        if (uW > 0 && uH > 0) {
+            const { canvas: checkCanvas, context: checkCtx } = createSmartCanvas(uW, uH);
+            checkCtx.drawImage(img, uX, uY, uW, uH, 0, 0, uW, uH);
+            // Threshold 240, Depth 2px
+            const edges = checkCanvasEdges(checkCtx, uW, uH, 240, 2); 
+            
+            // If an edge is pure white, disable padding for that side to prevent capturing neighbors
+            if (edges.top) pTop = 0;
+            if (edges.bottom) pBottom = 0;
+            if (edges.left) pLeft = 0;
+            if (edges.right) pRight = 0;
+        }
+        // --- END NEW LOGIC ---
+
+        // Calculate raw crop coordinates with dynamic padding
+        const x = Math.max(0, (xmin / 1000) * originalWidth - pLeft);
+        const y = Math.max(0, (ymin / 1000) * originalHeight - pTop);
+        const rawW = ((xmax - xmin) / 1000) * originalWidth + pLeft + pRight;
+        const rawH = ((ymax - ymin) / 1000) * originalHeight + pTop + pBottom;
         const w = Math.min(originalWidth - x, rawW);
         const h = Math.min(originalHeight - y, rawH);
 
         if (w < 1 || h < 1) return null;
 
-        // Draw raw crop
+        // Draw crop
         const { canvas: tempCanvas, context: tempCtx } = createSmartCanvas(Math.floor(w), Math.floor(h));
         tempCtx.drawImage(img, x, y, w, h, 0, 0, w, h);
 

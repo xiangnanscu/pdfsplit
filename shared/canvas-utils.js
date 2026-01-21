@@ -139,3 +139,68 @@ export const isContained = (a, b) => {
     ymaxA <= ymaxB + tolerance
   );
 };
+
+/**
+ * Checks if the edges of a canvas are white.
+ * Returns object indicating if each side is "clean" (white).
+ * Clean sides should NOT receive extra padding to avoid capturing neighboring content.
+ */
+export const checkCanvasEdges = (ctx, width, height, threshold = 240, depth = 2) => {
+  const w = Math.floor(width);
+  const h = Math.floor(height);
+  if (w <= 0 || h <= 0) return { top: true, bottom: true, left: true, right: true };
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+
+  const isInk = (idx) => {
+    // Check RGB < threshold and Alpha > 10
+    return data[idx + 3] > 10 && (data[idx] < threshold || data[idx + 1] < threshold || data[idx + 2] < threshold);
+  };
+
+  let topHasInk = false;
+  let bottomHasInk = false;
+  let leftHasInk = false;
+  let rightHasInk = false;
+
+  const d = Math.min(depth, Math.floor(h / 2), Math.floor(w / 2));
+
+  // Check Top
+  for (let y = 0; y < d; y++) {
+    for (let x = 0; x < w; x++) {
+      if (isInk((y * w + x) * 4)) { topHasInk = true; break; }
+    }
+    if (topHasInk) break;
+  }
+  
+  // Check Bottom
+  for (let y = h - d; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (isInk((y * w + x) * 4)) { bottomHasInk = true; break; }
+    }
+    if (bottomHasInk) break;
+  }
+
+  // Check Left
+  for (let x = 0; x < d; x++) {
+    for (let y = 0; y < h; y++) {
+      if (isInk((y * w + x) * 4)) { leftHasInk = true; break; }
+    }
+    if (leftHasInk) break;
+  }
+
+  // Check Right
+  for (let x = w - d; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      if (isInk((y * w + x) * 4)) { rightHasInk = true; break; }
+    }
+    if (rightHasInk) break;
+  }
+
+  return {
+    top: !topHasInk,
+    bottom: !bottomHasInk,
+    left: !leftHasInk,
+    right: !rightHasInk
+  };
+};
