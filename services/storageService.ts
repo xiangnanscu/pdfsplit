@@ -2,12 +2,11 @@
 import { DebugPageData, HistoryMetadata, DetectedQuestion, QuestionImage } from "../types";
 
 const DB_NAME = "MathSplitterDB";
-// STORE_INDEX contains only metadata: { id, name, timestamp, pageCount }
 const STORE_INDEX = "exams"; 
-// STORE_DETAILS contains heavy data: { id, rawPages, questions }
 const STORE_DETAILS = "exam_details"; 
+const STORE_CHUNKS = "exam_chunks"; // New store for image blobs
 
-const DB_VERSION = 3; // Keep version 3 as per previous migration
+const DB_VERSION = 4; // Upgrade to v4 for Chunking
 
 /**
  * Open (and initialize) the IndexedDB
@@ -18,60 +17,16 @@ const openDB = (): Promise<IDBDatabase> => {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      const transaction = (event.target as IDBOpenDBRequest).transaction;
-
-      // 1. Ensure Index Store Exists
+      
       if (!db.objectStoreNames.contains(STORE_INDEX)) {
         db.createObjectStore(STORE_INDEX, { keyPath: "id" });
       }
-
-      // 2. Ensure Details Store Exists
       if (!db.objectStoreNames.contains(STORE_DETAILS)) {
         db.createObjectStore(STORE_DETAILS, { keyPath: "id" });
       }
-
-      // 3. MIGRATION LOGIC: Split existing full records into Meta + Details
-      if (transaction) {
-        // Only run migration if we detect we might have old data structures or need to ensure integrity
-        // In this specific flow, standard creation is enough.
-        // If we were upgrading from v2 to v3, the logic below runs.
-        const indexStore = transaction.objectStore(STORE_INDEX);
-        const detailsStore = transaction.objectStore(STORE_DETAILS);
-
-        // Check if indexStore has items that might still be heavy (from v1/v2)
-        // Note: In a real upgrade scenario from v2, the store name was 'exams' which is now STORE_INDEX.
-        // So we iterate it to strip heavy data.
-        indexStore.openCursor().onsuccess = (e: any) => {
-          const cursor = e.target.result;
-          if (cursor) {
-            const record = cursor.value;
-            
-            // If the record still contains heavy data (rawPages), split it
-            if (record.rawPages) {
-              // Move heavy data to details store
-              detailsStore.put({
-                id: record.id,
-                rawPages: record.rawPages,
-                questions: record.questions || []
-              });
-
-              // Update index store to keep ONLY metadata
-              const metaOnly = {
-                id: record.id,
-                name: record.name,
-                timestamp: record.timestamp,
-                pageCount: record.pageCount
-              };
-              cursor.update(metaOnly);
-            }
-            cursor.continue();
-          }
-        };
-
-        // Clean up the temporary meta store from previous attempts if it exists
-        if (db.objectStoreNames.contains("exams_meta")) {
-            db.deleteObjectStore("exams_meta");
-        }
+      // Create Chunks Store: Key will be a composite string like "examID#type#fileName#id"
+      if (!db.objectStoreNames.contains(STORE_CHUNKS)) {
+        db.createObjectStore(STORE_CHUNKS);
       }
     };
 
@@ -86,13 +41,19 @@ const openDB = (): Promise<IDBDatabase> => {
 };
 
 /**
- * Save an exam result. 
- * Writes metadata to 'exams' and blobs to 'exam_details'.
+ * Helper to generate chunk keys
+ */
+const getChunkKey = (examId: string, type: 'q' | 'p', fileName: string, id: string | number) => {
+    return `${examId}#${type}#${fileName}#${id}`;
+};
+
+/**
+ * Save an exam result with CHUNKING.
+ * Separates heavy base64 strings into the chunks store.
  */
 export const saveExamResult = async (fileName: string, rawPages: DebugPageData[], questions: QuestionImage[] = []): Promise<string> => {
   const db = await openDB();
   
-  // Check if updating existing
   const list = await getHistoryList();
   const existing = list.find(h => h.name === fileName);
   const id = existing ? existing.id : crypto.randomUUID();
@@ -102,6 +63,7 @@ export const saveExamResult = async (fileName: string, rawPages: DebugPageData[]
   const uniquePages = Array.from(new Map(rawPages.map(item => [item.pageNumber, item])).values());
   uniquePages.sort((a, b) => a.pageNumber - b.pageNumber);
 
+  // Prepare Metadata
   const metaRecord: HistoryMetadata = {
     id,
     name: fileName,
@@ -109,15 +71,47 @@ export const saveExamResult = async (fileName: string, rawPages: DebugPageData[]
     pageCount: uniquePages.length
   };
 
-  const detailsRecord = {
-    id,
-    rawPages: uniquePages,
-    questions: questions
-  };
-
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS, STORE_CHUNKS], "readwrite");
+    const chunksStore = transaction.objectStore(STORE_CHUNKS);
     
+    // 1. Process Pages: Strip DataURL, Save to Chunks
+    const skeletonPages = uniquePages.map(p => {
+        if (p.dataUrl) {
+            const key = getChunkKey(id, 'p', p.fileName, p.pageNumber);
+            chunksStore.put(p.dataUrl, key);
+        }
+        // Return skeleton
+        return {
+            ...p,
+            dataUrl: undefined // Remove from main object
+        };
+    });
+
+    // 2. Process Questions: Strip DataURL, Save to Chunks
+    const skeletonQuestions = questions.map(q => {
+        if (q.dataUrl) {
+            const key = getChunkKey(id, 'q', q.fileName, q.id);
+            chunksStore.put(q.dataUrl, key);
+        }
+        if (q.originalDataUrl) {
+            const keyOrig = getChunkKey(id, 'q', q.fileName, `${q.id}_orig`);
+            chunksStore.put(q.originalDataUrl, keyOrig);
+        }
+        return {
+            ...q,
+            dataUrl: undefined,
+            originalDataUrl: undefined
+        };
+    });
+
+    // 3. Save Details (Skeleton)
+    const detailsRecord = {
+        id,
+        rawPages: skeletonPages,
+        questions: skeletonQuestions
+    };
+
     transaction.objectStore(STORE_INDEX).put(metaRecord);
     transaction.objectStore(STORE_DETAILS).put(detailsRecord);
 
@@ -126,17 +120,82 @@ export const saveExamResult = async (fileName: string, rawPages: DebugPageData[]
   });
 };
 
-/**
- * Update existing exam. Used for Re-analysis.
- */
 export const reSaveExamResult = async (fileName: string, rawPages: DebugPageData[], questions?: QuestionImage[]): Promise<void> => {
   return saveExamResult(fileName, rawPages, questions || []).then(() => {});
 };
 
 /**
- * Update detections/questions for a specific page.
- * FIXED: Now updates timestamp in STORE_INDEX to ensure consistency.
+ * Fetch a specific chunk (Image Data)
  */
+export const getChunkData = async (key: string): Promise<string | undefined> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_CHUNKS], "readonly");
+        const request = transaction.objectStore(STORE_CHUNKS).get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => resolve(undefined); // Fail gracefully
+    });
+};
+
+/**
+ * Convenience: Get Question Image
+ */
+export const getQuestionImage = async (examId: string, fileName: string, questionId: string): Promise<string | undefined> => {
+    return getChunkData(getChunkKey(examId, 'q', fileName, questionId));
+};
+
+export const getQuestionOriginalImage = async (examId: string, fileName: string, questionId: string): Promise<string | undefined> => {
+    return getChunkData(getChunkKey(examId, 'q', fileName, `${questionId}_orig`));
+};
+
+/**
+ * Convenience: Get Page Image
+ */
+export const getPageImage = async (examId: string, fileName: string, pageNumber: number): Promise<string | undefined> => {
+    return getChunkData(getChunkKey(examId, 'p', fileName, pageNumber));
+};
+
+/**
+ * Load exam result. 
+ * NOTE: Returns "Skeleton" objects (dataUrl is undefined). Components must lazy load.
+ * Supports legacy records by returning them as-is if chunks aren't found (backward compatibility).
+ */
+export const loadExamResult = async (id: string): Promise<{ rawPages: DebugPageData[], questions?: QuestionImage[], name: string } | null> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readonly");
+    
+    const metaReq = transaction.objectStore(STORE_INDEX).get(id);
+    const detailsReq = transaction.objectStore(STORE_DETAILS).get(id);
+
+    let meta: HistoryMetadata | null = null;
+    let details: any | null = null;
+    let completed = 0;
+
+    const checkDone = () => {
+        if (completed === 2) {
+            if (meta && details) {
+                resolve({
+                    name: meta.name,
+                    rawPages: details.rawPages || [],
+                    questions: details.questions || []
+                });
+            } else {
+                resolve(null);
+            }
+        }
+    };
+
+    metaReq.onsuccess = () => { meta = metaReq.result; completed++; checkDone(); };
+    detailsReq.onsuccess = () => { details = detailsReq.result; completed++; checkDone(); };
+    
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+// ... Rest of the legacy update functions (updatePageDetectionsAndQuestions, etc) need to be aware of chunks ...
+// For simplicity in this refactor, we assume "update" functions fetch the full record, modify it, and re-save using the new saveExamResult logic which handles chunking automatically.
+
 export const updatePageDetectionsAndQuestions = async (
     fileName: string, 
     pageNumber: number, 
@@ -147,35 +206,60 @@ export const updatePageDetectionsAndQuestions = async (
   const targetItem = list.find(h => h.name === fileName);
   if (!targetItem) return;
 
+  // We need to fetch the current raw page to get its image data if it's chunked, 
+  // because we need to re-save it. 
+  // Actually, for just updating detections, we don't need the image data if we are just updating the metadata array.
+  // BUT, saveExamResult expects full data or it might overwrite chunks with undefined.
+  
+  // STRATEGY: Read Skeleton -> Update Metadata -> Save (Save logic handles undefined dataUrl by NOT overwriting existing chunk if undefined? No, put(undefined) is bad)
+  
+  // Revised Strategy for Updates: 
+  // We manually update the details object and leave chunks alone unless we have new image data.
+  
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    // Open transaction on BOTH stores
     const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
     const detailsStore = transaction.objectStore(STORE_DETAILS);
     const indexStore = transaction.objectStore(STORE_INDEX);
-    
-    // 1. Get Details
+
     const getReq = detailsStore.get(targetItem.id);
-    
     getReq.onsuccess = () => {
         const record = getReq.result;
-        if (!record || !record.rawPages) {
-            resolve();
-            return;
-        }
+        if (!record || !record.rawPages) { resolve(); return; }
 
-        // Update specific page in Details
+        // 1. Update Detections (Metadata only)
         const pageIndex = record.rawPages.findIndex((p: DebugPageData) => p.pageNumber === pageNumber);
         if (pageIndex !== -1) {
             record.rawPages[pageIndex].detections = newDetections;
         }
 
-        // Update questions in Details
-        record.questions = newFileQuestions;
+        // 2. Update Questions
+        // This is tricky. newFileQuestions likely contains dataUrls if they were just generated.
+        // If they are skeleton, we just save skeleton.
+        // We should allow the caller to pass full questions, and we strip them here manually before saving to details.
+        // But we also need to save the chunks!
+        
+        // So we really should reuse the `saveExamResult` logic but scoped to updating specific fields.
+        // Since `saveExamResult` is heavy, let's do a partial chunk update here.
+        
+        // A. Handle Questions Chunking manually here
+        const chunksStore = transaction.objectStore(STORE_CHUNKS);
+        const skeletonQuestions = newFileQuestions.map(q => {
+            if (q.dataUrl) {
+                const key = getChunkKey(targetItem.id, 'q', q.fileName, q.id);
+                chunksStore.put(q.dataUrl, key);
+            }
+             if (q.originalDataUrl) {
+                const keyOrig = getChunkKey(targetItem.id, 'q', q.fileName, `${q.id}_orig`);
+                chunksStore.put(q.originalDataUrl, keyOrig);
+            }
+            return { ...q, dataUrl: undefined, originalDataUrl: undefined };
+        });
+        
+        record.questions = skeletonQuestions;
         detailsStore.put(record);
 
-        // 2. Update Timestamp in Index (Meta)
-        // We get the current meta to preserve other fields, just update timestamp
+        // 3. Update Timestamp
         const metaReq = indexStore.get(targetItem.id);
         metaReq.onsuccess = () => {
             const meta = metaReq.result;
@@ -188,34 +272,72 @@ export const updatePageDetectionsAndQuestions = async (
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
     };
-    getReq.onerror = () => reject(getReq.error);
   });
 };
 
 export const updatePageDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => {
-    return updatePageDetectionsAndQuestions(fileName, pageNumber, newDetections, []); 
+    // Legacy wrapper - just updates detections, no question changes
+     const list = await getHistoryList();
+     const targetItem = list.find(h => h.name === fileName);
+     if (!targetItem) return;
+
+     const db = await openDB();
+     return new Promise<void>((resolve, reject) => {
+         const tx = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+         const store = tx.objectStore(STORE_DETAILS);
+         store.get(targetItem.id).onsuccess = (e: any) => {
+             const record = e.target.result;
+             if (record) {
+                 const idx = record.rawPages.findIndex((p:any) => p.pageNumber === pageNumber);
+                 if (idx !== -1) {
+                     record.rawPages[idx].detections = newDetections;
+                     store.put(record);
+                     
+                     // Update timestamp
+                     const metaStore = tx.objectStore(STORE_INDEX);
+                     metaStore.get(targetItem.id).onsuccess = (ev: any) => {
+                         const meta = ev.target.result;
+                         if (meta) {
+                             meta.timestamp = Date.now();
+                             metaStore.put(meta);
+                         }
+                     };
+                 }
+             }
+         };
+         tx.oncomplete = () => resolve();
+         tx.onerror = () => reject(tx.error);
+     });
 };
 
-/**
- * Update ONLY questions for a specific exam ID.
- * FIXED: Now updates timestamp in STORE_INDEX to ensure consistency.
- */
 export const updateExamQuestionsOnly = async (id: string, questions: QuestionImage[]): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS, STORE_CHUNKS], "readwrite");
     const detailsStore = transaction.objectStore(STORE_DETAILS);
     const indexStore = transaction.objectStore(STORE_INDEX);
+    const chunksStore = transaction.objectStore(STORE_CHUNKS);
     
-    // 1. Update Details
     const getReq = detailsStore.get(id);
     getReq.onsuccess = () => {
         const record = getReq.result;
         if (record) {
-            record.questions = questions;
+            // Strip and Save Chunks
+            const skeletonQuestions = questions.map(q => {
+                if (q.dataUrl) {
+                    const key = getChunkKey(id, 'q', q.fileName, q.id);
+                    chunksStore.put(q.dataUrl, key);
+                }
+                if (q.originalDataUrl) {
+                    const key = getChunkKey(id, 'q', q.fileName, `${q.id}_orig`);
+                    chunksStore.put(q.originalDataUrl, key);
+                }
+                return { ...q, dataUrl: undefined, originalDataUrl: undefined };
+            });
+
+            record.questions = skeletonQuestions;
             detailsStore.put(record);
 
-            // 2. Update Timestamp in Index
             const metaReq = indexStore.get(id);
             metaReq.onsuccess = () => {
                 const meta = metaReq.result;
@@ -235,17 +357,12 @@ export const updateExamQuestionsOnly = async (id: string, questions: QuestionIma
 };
 
 
-/**
- * Get History List.
- * FAST: Only reads from the lightweight 'exams' store.
- */
 export const getHistoryList = async (): Promise<HistoryMetadata[]> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_INDEX], "readonly");
     const store = transaction.objectStore(STORE_INDEX);
     const request = store.getAll();
-
     request.onsuccess = () => {
       const results = request.result as HistoryMetadata[];
       resolve(results.sort((a, b) => b.timestamp - a.timestamp));
@@ -254,61 +371,22 @@ export const getHistoryList = async (): Promise<HistoryMetadata[]> => {
   });
 };
 
-/**
- * Load full exam result.
- * JOIN: Fetches metadata from 'exams' and heavy blobs from 'exam_details'.
- */
-export const loadExamResult = async (id: string): Promise<{ rawPages: DebugPageData[], questions?: QuestionImage[], name: string } | null> => {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readonly");
-    
-    // We need both parts
-    const metaReq = transaction.objectStore(STORE_INDEX).get(id);
-    const detailsReq = transaction.objectStore(STORE_DETAILS).get(id);
-
-    // Wait for transaction completion or handle manual Promise.all
-    let meta: HistoryMetadata | null = null;
-    let details: any | null = null;
-    let completed = 0;
-
-    const checkDone = () => {
-        if (completed === 2) {
-            if (meta && details) {
-                resolve({
-                    name: meta.name,
-                    rawPages: details.rawPages || [],
-                    questions: details.questions || []
-                });
-            } else if (meta && !details) {
-                // Should not happen unless migration failed, but robust fallback
-                resolve({
-                    name: meta.name,
-                    rawPages: [],
-                    questions: []
-                });
-            } else {
-                resolve(null);
-            }
-        }
-    };
-
-    metaReq.onsuccess = () => { meta = metaReq.result; completed++; checkDone(); };
-    detailsReq.onsuccess = () => { details = detailsReq.result; completed++; checkDone(); };
-    
-    transaction.onerror = () => reject(transaction.error);
-  });
-};
-
-/**
- * Delete. Removes from BOTH stores.
- */
 export const deleteExamResult = async (id: string): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS, STORE_CHUNKS], "readwrite");
     transaction.objectStore(STORE_INDEX).delete(id);
     transaction.objectStore(STORE_DETAILS).delete(id);
+    
+    // Also delete chunks? Ideally yes. But keys are complex.
+    // Iterating to delete might be slow. For now we leave chunks orphaned or we need a range delete.
+    // Efficient range delete requires an Index on examId, which we didn't create on STORE_CHUNKS.
+    // We can iterate cursor for now (slow but cleaner).
+    const chunkStore = transaction.objectStore(STORE_CHUNKS);
+    // Optimization: Since keys start with `${id}#`, we can use a key range
+    const keyRange = IDBKeyRange.bound(`${id}#`, `${id}#\uffff`);
+    chunkStore.delete(keyRange);
+
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -317,13 +395,16 @@ export const deleteExamResult = async (id: string): Promise<void> => {
 export const deleteExamResults = async (ids: string[]): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
+    const transaction = db.transaction([STORE_INDEX, STORE_DETAILS, STORE_CHUNKS], "readwrite");
     const indexStore = transaction.objectStore(STORE_INDEX);
     const detailsStore = transaction.objectStore(STORE_DETAILS);
+    const chunksStore = transaction.objectStore(STORE_CHUNKS);
 
     ids.forEach(id => {
         indexStore.delete(id);
         detailsStore.delete(id);
+        const keyRange = IDBKeyRange.bound(`${id}#`, `${id}#\uffff`);
+        chunksStore.delete(keyRange);
     });
 
     transaction.oncomplete = () => resolve();
@@ -332,9 +413,10 @@ export const deleteExamResults = async (ids: string[]): Promise<void> => {
 };
 
 export const cleanupHistoryItem = async (id: string): Promise<number> => {
+   // Cleanup logic remains similar but acting on skeleton pages
+   // Since dedup only checks pageNumber and detection count, skeleton is enough.
   const db = await openDB();
   
-  // Get Details
   const details: any = await new Promise((resolve, reject) => {
       const tx = db.transaction([STORE_DETAILS], "readonly");
       const req = tx.objectStore(STORE_DETAILS).get(id);
@@ -363,25 +445,19 @@ export const cleanupHistoryItem = async (id: string): Promise<number> => {
 
   if (uniquePages.length === originalCount) return 0;
 
-  // Update
   await new Promise<void>((resolve, reject) => {
      const tx = db.transaction([STORE_INDEX, STORE_DETAILS], "readwrite");
-     
-     // Update Details
      details.rawPages = uniquePages;
      tx.objectStore(STORE_DETAILS).put(details);
-
-     // Update Meta Page Count and Timestamp
      const metaReq = tx.objectStore(STORE_INDEX).get(id);
      metaReq.onsuccess = () => {
          const meta = metaReq.result;
          if (meta) {
              meta.pageCount = uniquePages.length;
-             meta.timestamp = Date.now(); // Also update timestamp for consistency
+             meta.timestamp = Date.now();
              tx.objectStore(STORE_INDEX).put(meta);
          }
      };
-     
      tx.oncomplete = () => resolve();
      tx.onerror = () => reject(tx.error);
   });

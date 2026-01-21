@@ -16,14 +16,14 @@ export interface QuestionImage {
   id: string;
   pageNumber: number;
   fileName: string; // Added to track which PDF this question belongs to
-  dataUrl: string;
+  dataUrl?: string; // Optional: May be unloaded (lazy)
   originalDataUrl?: string; // Used for "Before/After" comparison if trimming occurred
 }
 
 export interface DebugPageData {
   pageNumber: number;
   fileName: string; // Added to track source file
-  dataUrl: string; // The full page image
+  dataUrl?: string; // Optional: May be unloaded (lazy)
   width: number;
   height: number;
   detections: DetectedQuestion[]; // Raw coordinates from Gemini
