@@ -23,6 +23,7 @@ interface Props {
   onRefineFile?: (fileName: string) => void;
   onProcessFile?: (fileName: string) => void;
   isZipping?: boolean;
+  zippingProgress?: string;
   isGlobalProcessing?: boolean;
   processingFiles: Set<string>;
   currentFileIndex: number;
@@ -46,6 +47,7 @@ export const DebugRawView: React.FC<Props> = ({
   onRefineFile,
   onProcessFile,
   isZipping,
+  zippingProgress,
   isGlobalProcessing = false,
   processingFiles,
   currentFileIndex,
@@ -330,6 +332,7 @@ export const DebugRawView: React.FC<Props> = ({
          onRefine={!isCurrentFileProcessing && onRefineFile && title ? () => onRefineFile(title) : undefined}
          onProcess={!isCurrentFileProcessing && onProcessFile && title ? () => onProcessFile(title) : undefined}
          isZipping={isZipping}
+         zippingProgress={zippingProgress}
          hasNextFile={hasNextFile}
          hasPrevFile={hasPrevFile}
       />

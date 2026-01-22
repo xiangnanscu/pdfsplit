@@ -86,7 +86,24 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
                  workerConcurrency
              );
 
-             // 3. Stats & Save
+             // 3. Update Active State if this file is currently loaded
+             // This ensures the UI reflects the changes immediately if the user is viewing this file
+             // We check against the rawPages currently in state at the start of this batch process
+             const isFileLoaded = rawPages.some((p: any) => p.fileName === fileName);
+             
+             if (isFileLoaded) {
+                 setQuestions((prev: QuestionImage[]) => {
+                     const others = prev.filter(q => q.fileName !== fileName);
+                     const combined = [...others, ...generatedQuestions];
+                     return combined.sort((a, b) => {
+                         if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
+                         if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+                         return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
+                     });
+                 });
+             }
+
+             // 4. Stats & Save
              const oldUrls = new Set((record.questions || []).map(q => q.dataUrl));
              let fileChangedCount = 0;
              generatedQuestions.forEach(q => {
@@ -100,7 +117,7 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
              
              setCompletedCount(i + 1);
 
-             // 4. Force GC Opportunity / UI Refresh
+             // 5. Force GC Opportunity / UI Refresh
              await new Promise(resolve => setTimeout(resolve, 20));
          }
 
