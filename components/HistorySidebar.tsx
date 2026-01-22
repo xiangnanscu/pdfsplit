@@ -297,10 +297,10 @@ export const HistorySidebar: React.FC<Props> = ({
             )}
           </div>
           {isLoading && (
-            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10 animate-fade-in">
-              <div className="flex flex-col items-center gap-4 bg-white p-6 rounded-3xl shadow-2xl border border-slate-100">
-                <div className="relative w-16 h-16 flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90">
+            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10 animate-fade-in p-8">
+              <div className="flex flex-col items-center gap-6 bg-white p-8 rounded-3xl shadow-2xl border border-slate-100 w-full">
+                <div className="relative w-20 h-20 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 64 64">
                         <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-slate-100" />
                         <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-blue-600 transition-all duration-300 ease-out" 
                                 strokeDasharray={2 * Math.PI * 28}
@@ -308,11 +308,11 @@ export const HistorySidebar: React.FC<Props> = ({
                                 strokeLinecap="round"
                         />
                     </svg>
-                    <span className="absolute text-xs font-black text-slate-800">{Math.round(progress || 0)}%</span>
+                    <span className="absolute text-lg font-black text-slate-800">{Math.round(progress || 0)}%</span>
                 </div>
-                <div className="text-center">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Processing</p>
-                    <p className="text-sm font-bold text-slate-900 max-w-[200px] truncate">{loadingText || "Please wait..."}</p>
+                <div className="text-center w-full">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Processing Batch</p>
+                    <p className="text-sm font-bold text-slate-900 w-full break-words">{loadingText || "Please wait..."}</p>
                 </div>
               </div>
             </div>
