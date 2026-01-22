@@ -20,27 +20,12 @@ export const STORAGE_KEYS = {
 
 // Helper for auto-detect batch size based on RAM and CPU
 export const getAutoBatchSize = (): number => {
-  let score = 20; // Base score
-  
-  if (typeof navigator !== 'undefined') {
-    // RAM Factor
-    if ('deviceMemory' in navigator) {
-      // @ts-ignore
-      const ram = navigator.deviceMemory as number; 
-      if (ram <= 4) score = 10;
-      else if (ram <= 8) score = 25;
-      else score = 50;
-    }
-    
-    // CPU Factor - If user has many cores, they can handle slightly larger batches effectively
-    if ('hardwareConcurrency' in navigator) {
-       const cores = navigator.hardwareConcurrency;
-       if (cores >= 12) score += 10; // High-end CPU
-       else if (cores <= 4 && score > 20) score -= 5; // Low-end CPU but High RAM (unlikely but safe)
-    }
+  // Use hardware concurrency to determine optimal batch size for CPU-bound tasks (Canvas operations)
+  // Exceeding core count causes context switching overhead which degrades performance.
+  if (typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator) {
+    return navigator.hardwareConcurrency || 4;
   }
-  
-  return score; 
+  return 4; 
 };
 
 export const useExamState = () => {
@@ -99,7 +84,7 @@ export const useExamState = () => {
       const saved = localStorage.getItem(STORAGE_KEYS.BATCH_SIZE);
       return saved ? Math.max(1, parseInt(saved, 10)) : getAutoBatchSize();
     } catch {
-      return 20;
+      return getAutoBatchSize();
     }
   });
 
