@@ -1,4 +1,5 @@
 
+
 /**
  * Shared Canvas Logic for "Edge Peel" algorithm.
  * Works in both Browser (DOM Canvas) and Node.js (node-canvas).
@@ -145,7 +146,7 @@ export const isContained = (a, b) => {
  * Returns object indicating if each side is "clean" (white).
  * Clean sides should NOT receive extra padding to avoid capturing neighboring content.
  */
-export const checkCanvasEdges = (ctx, width, height, threshold = 240, depth = 2) => {
+export const checkCanvasEdges = (ctx, width, height, threshold = 230, depth = 2) => {
   const w = Math.floor(width);
   const h = Math.floor(height);
   if (w <= 0 || h <= 0) return { top: true, bottom: true, left: true, right: true };

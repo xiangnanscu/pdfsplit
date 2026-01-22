@@ -1,4 +1,5 @@
 
+
 // This file contains the worker code as a string to avoid bundler configuration issues in the browser environment.
 // It replicates the logic from canvas-utils.js and pdfService.ts adapted for a Worker environment (OffscreenCanvas).
 
@@ -6,7 +7,7 @@ const WORKER_CODE = `
 /**
  * SHARED CANVAS UTILS (Inlined for Worker)
  */
-const checkCanvasEdges = (ctx, width, height, threshold = 240, depth = 2) => {
+const checkCanvasEdges = (ctx, width, height, threshold = 230, depth = 2) => {
   const w = Math.floor(width);
   const h = Math.floor(height);
   if (w <= 0 || h <= 0) return { top: true, bottom: true, left: true, right: true };
@@ -269,7 +270,8 @@ const processParts = async (sourceDataUrl, boxes, originalWidth, originalHeight,
         if (uW > 0 && uH > 0) {
             const { canvas: checkCanvas, context: checkCtx } = createSmartCanvas(uW, uH);
             checkCtx.drawImage(imgBitmap, uX, uY, uW, uH, 0, 0, uW, uH);
-            const edges = checkCanvasEdges(checkCtx, uW, uH, 240, 2); 
+            // Lowered threshold to 230 to tolerate more noise (white with artifacts)
+            const edges = checkCanvasEdges(checkCtx, uW, uH, 230, 2); 
             if (edges.top) pTop = 0;
             if (edges.bottom) pBottom = 0;
             if (edges.left) pLeft = 0;
@@ -460,22 +462,48 @@ const generateDebugPreviews = async (sourceDataUrl, boxes, originalWidth, origin
     });
     const stage1 = await canvasToDataURL(s1Canvas);
 
-    // Stage 2: Crop Padding
+    // Stage 2: Smart Crop Padding (Reflecting actual logic)
     const { canvas: s2Canvas, context: s2Ctx } = createSmartCanvas(1, 1);
-    const s2Fragments = boxes.map(box => {
+    const s2Fragments = [];
+    
+    for (const box of boxes) {
          const [ymin, xmin, ymax, xmax] = box;
-         const p = settings.cropPadding;
+         
+         // --- SMART PADDING CALCULATION ---
+         const uX = Math.floor((xmin / 1000) * originalWidth);
+         const uY = Math.floor((ymin / 1000) * originalHeight);
+         const uW = Math.ceil(((xmax - xmin) / 1000) * originalWidth);
+         const uH = Math.ceil(((ymax - ymin) / 1000) * originalHeight);
+
+         let pTop = settings.cropPadding;
+         let pBottom = settings.cropPadding;
+         let pLeft = settings.cropPadding;
+         let pRight = settings.cropPadding;
+
+         if (uW > 0 && uH > 0) {
+            const { canvas: checkCanvas, context: checkCtx } = createSmartCanvas(uW, uH);
+            checkCtx.drawImage(imgBitmap, uX, uY, uW, uH, 0, 0, uW, uH);
+            // Lowered threshold to 230 to match processParts
+            const edges = checkCanvasEdges(checkCtx, uW, uH, 230, 2); 
+            if (edges.top) pTop = 0;
+            if (edges.bottom) pBottom = 0;
+            if (edges.left) pLeft = 0;
+            if (edges.right) pRight = 0;
+         }
+         // ---------------------------------
+
          const rawX = (xmin / 1000) * originalWidth;
          const rawY = (ymin / 1000) * originalHeight;
          const rawW = ((xmax - xmin) / 1000) * originalWidth;
          const rawH = ((ymax - ymin) / 1000) * originalHeight;
          
-         const x = Math.max(0, rawX - p);
-         const y = Math.max(0, rawY - p);
-         const w = Math.min(originalWidth - x, rawW + (p * 2));
-         const h = Math.min(originalHeight - y, rawH + (p * 2));
-         return { x, y, w, h };
-    });
+         const x = Math.max(0, rawX - pLeft);
+         const y = Math.max(0, rawY - pTop);
+         const w = Math.min(originalWidth - x, rawW + pLeft + pRight);
+         const h = Math.min(originalHeight - y, rawH + pTop + pBottom);
+         s2Fragments.push({ x, y, w, h });
+    }
+
     const s2MaxW = Math.max(...s2Fragments.map(f => f.w));
     const s2TotalH = s2Fragments.reduce((acc, f) => acc + f.h + 10, 0);
     s2Canvas.width = s2MaxW;
