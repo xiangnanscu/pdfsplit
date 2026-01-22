@@ -1,3 +1,4 @@
+
 import { useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
@@ -18,7 +19,7 @@ interface ProcessorProps {
 
 export const useFileProcessor = ({ state, setters, refs, actions, refreshHistoryList }: ProcessorProps) => {
   const {
-    cropSettings, concurrency, selectedModel, useHistoryCache
+    cropSettings, concurrency, selectedModel, useHistoryCache, batchSize
   } = state;
 
   const {
@@ -162,13 +163,13 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
         
       } else {
          if (allRawPages.length > 0) {
-            // Updated to use user-defined concurrency strictly
+            // Using batchSize for image processing (concurrency variable is for Gemini)
             const qs = await generateQuestionsFromRawPages(
                 allRawPages, 
                 cropSettings, 
                 new AbortController().signal,
                 undefined, // no callback for zip load needed usually, or add if wanted
-                concurrency
+                batchSize || 10
             );
             setQuestions(qs);
             setCompletedCount(allRawPages.length);
@@ -282,13 +283,13 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
 
          if (filesNeedingGen.length > 0) {
              const pagesToGen = uniqueCached.filter(p => filesNeedingGen.includes(p.fileName));
-             // Updated usage
+             // Use batchSize for image processing
              const generated = await generateQuestionsFromRawPages(
                  pagesToGen, 
                  cropSettings, 
                  signal,
                  undefined, 
-                 concurrency
+                 batchSize || 10
              );
              questionsFromCache = [...questionsFromCache, ...generated];
          }
@@ -372,6 +373,7 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
 
                  const task = (async () => {
                      try {
+                         // Gemini API usage: use concurrency
                          const detections = await detectQuestionsOnPage(pageData.dataUrl, selectedModel);
                          
                          const resultPage: DebugPageData = {
@@ -398,7 +400,7 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
                                      const filePages = current.filter((p: any) => p.fileName === pageData.fileName);
                                      filePages.sort((a: any,b: any) => a.pageNumber - b.pageNumber);
                                      
-                                     // Use callback to update questions in real-time
+                                     // Image processing usage: use batchSize
                                      generateQuestionsFromRawPages(
                                         filePages, 
                                         cropSettings, 
@@ -417,7 +419,7 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
                                                 });
                                             }
                                         },
-                                        concurrency
+                                        batchSize || 10
                                      ).then(newQuestions => {
                                         if (!signal.aborted && !stopRequestedRef.current) {
                                             // Final save (questions already in state)

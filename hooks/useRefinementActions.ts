@@ -13,7 +13,7 @@ interface RefinementProps {
 }
 
 export const useRefinementActions = ({ state, setters, actions, refreshHistoryList }: RefinementProps) => {
-  const { rawPages, concurrency, selectedModel, cropSettings } = state;
+  const { rawPages, concurrency, selectedModel, cropSettings, batchSize } = state;
   const { setQuestions, setRawPages, setProcessingFiles, setCroppingDone } = setters;
   const { addNotification } = actions;
 
@@ -27,6 +27,7 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
     setters.setRefiningFile(null); 
 
     try {
+       // Using batchSize for purely image processing tasks
        const newQuestions = await generateQuestionsFromRawPages(
          targetPages, 
          specificSettings, 
@@ -34,7 +35,7 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
          {
              onProgress: () => setCroppingDone((p: number) => p + 1)
          },
-         concurrency
+         batchSize || 10
         );
        
        if (!taskController.signal.aborted) {
@@ -77,6 +78,7 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
         const updatedRawPages = [...rawPages];
         
         const chunks = [];
+        // Gemini API calls still use concurrency
         for (let i = 0; i < filePages.length; i += concurrency) {
             chunks.push(filePages.slice(i, i + concurrency));
         }
@@ -104,6 +106,7 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
         
         const finalFilePages = mergedRawPages.filter(p => p.fileName === fileName);
         
+        // Image generation uses batchSize
         const newQuestions = await generateQuestionsFromRawPages(
             finalFilePages, 
             cropSettings, 
@@ -111,7 +114,7 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
             {
                 onProgress: () => setCroppingDone((p: number) => p + 1)
             },
-            concurrency
+            batchSize || 10
         );
         
         if (!signal.aborted) {
@@ -162,6 +165,7 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
 
           const taskController = new AbortController();
           
+          // Image generation uses batchSize
           const newQuestions = await generateQuestionsFromRawPages(
               targetPages, 
               cropSettings, 
@@ -169,7 +173,7 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
               {
                   onProgress: () => setCroppingDone((p: number) => p + 1)
               },
-              concurrency
+              batchSize || 10
           );
           
           if (!taskController.signal.aborted) {
