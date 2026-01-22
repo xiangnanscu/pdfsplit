@@ -116,7 +116,12 @@ const getTrimmedBounds = (ctx, width, height) => {
   };
 };
 
-const trimWhitespace = (ctx, width, height) => {
+/**
+ * Enhanced Trim Whitespace with Threshold Limit
+ * @param limit - Max pixels to trim. If whitespace > limit, trim to limit. If < limit, keep as is.
+ *                This preserves relative indentation ("alignment whitespace").
+ */
+const trimWhitespace = (ctx, width, height, limit = 0) => {
   const w = Math.floor(width);
   const h = Math.floor(height);
   if (w <= 0 || h <= 0) return { x: 0, y: 0, w: 0, h: 0 };
@@ -150,10 +155,21 @@ const trimWhitespace = (ctx, width, height) => {
   let left = 0;
   let right = w;
 
+  // Trim Top
   while (top < h && !rowHasInk(top)) { top++; }
+  if (limit > 0 && top > limit) top = limit; // Stop trimming if we exceeded limit
+
+  // Trim Bottom
   while (bottom > top && !rowHasInk(bottom - 1)) { bottom--; }
+  if (limit > 0 && (h - bottom) > limit) bottom = h - limit;
+
+  // Trim Left
   while (left < w && !colHasInk(left)) { left++; }
+  if (limit > 0 && left > limit) left = limit;
+
+  // Trim Right
   while (right > left && !colHasInk(right - 1)) { right--; }
+  if (limit > 0 && (w - right) > limit) right = w - limit;
 
   return {
     x: left,
@@ -173,30 +189,6 @@ const isContained = (a, b) => {
     yminA >= yminB - tolerance &&
     ymaxA <= ymaxB + tolerance
   );
-};
-
-const scanVerticalBounds = (ctx, w, h) => {
-    const imageData = ctx.getImageData(0, 0, w, h);
-    const data = imageData.data;
-    const threshold = 242;
-
-    const isRowEmpty = (y) => {
-        for(let x = 0; x < w; x++) {
-            const i = (y * w + x) * 4;
-            if (data[i+3] > 10 && (data[i] < threshold || data[i+1] < threshold || data[i+2] < threshold)) {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    let top = 0;
-    let bottom = h;
-
-    while(top < h && isRowEmpty(top)) top++;
-    while(bottom > top && isRowEmpty(bottom - 1)) bottom--;
-
-    return { y: top, h: Math.max(0, bottom - top) };
 };
 
 /**
@@ -226,8 +218,11 @@ const canvasToDataURL = async (canvas) => {
     });
 };
 
-// constructQuestionCanvas equivalent
-const processParts = async (sourceDataUrl, boxes, originalWidth, originalHeight, settings) => {
+/**
+ * Process a single part (Step 1: Crop)
+ * Handles stitching multiple detected boxes for a single part if needed.
+ */
+const processPartsRaw = async (sourceDataUrl, boxes, originalWidth, originalHeight, settings) => {
     if (!boxes || boxes.length === 0) return null;
 
     // Filter nested
@@ -270,7 +265,6 @@ const processParts = async (sourceDataUrl, boxes, originalWidth, originalHeight,
         if (uW > 0 && uH > 0) {
             const { canvas: checkCanvas, context: checkCtx } = createSmartCanvas(uW, uH);
             checkCtx.drawImage(imgBitmap, uX, uY, uW, uH, 0, 0, uW, uH);
-            // Lowered threshold to 230 to tolerate more noise (white with artifacts)
             const edges = checkCanvasEdges(checkCtx, uW, uH, 230, 2); 
             if (edges.top) pTop = 0;
             if (edges.bottom) pBottom = 0;
@@ -326,7 +320,7 @@ const processParts = async (sourceDataUrl, boxes, originalWidth, originalHeight,
 
     // Generate Original (Raw) Data URL for comparison
     let originalDataUrl = undefined;
-    const exportPadding = 10; // Default or from settings if we passed it
+    const exportPadding = 10; 
     const maxRawWidth = Math.max(...processedFragments.map(f => f.sourceCanvas.width));
     const finalRawWidth = maxRawWidth + (exportPadding * 2);
     const finalRawHeight = processedFragments.reduce((acc, f) => acc + f.sourceCanvas.height, 0) + (fragmentGap * (Math.max(0, processedFragments.length - 1))) + (exportPadding * 2);
@@ -351,79 +345,85 @@ const processParts = async (sourceDataUrl, boxes, originalWidth, originalHeight,
 };
 
 const processLogicalQuestion = async (task, settings, targetWidth = 0) => {
-    // 1. Crop Parts
-    const partsCanvas = [];
+    const partsImages = []; 
+
+    // Process each part individually: 
+    // Step 1 (Crop) -> Step 2 (Trim w/ Limit) -> Step 3 (Pad) -> Step 4 (Align)
     for (const part of task.parts) {
          let boxes = part.detection.boxes_2d;
          if (!Array.isArray(boxes[0])) boxes = [boxes];
 
-         const res = await processParts(
+         // Step 1: Crop
+         const rawRes = await processPartsRaw(
              part.pageObj.dataUrl,
              boxes,
              part.pageObj.width,
              part.pageObj.height,
              settings
          );
-         if (res) partsCanvas.push({ canvas: res.canvas, originalDataUrl: res.originalDataUrl });
-    }
+         if (!rawRes) continue;
 
-    if (partsCanvas.length === 0) return null;
+         // Step 2: Trim Whitespace (with Threshold Limit)
+         // Default limit 50px. If whitespace < 50, keep it (alignment). If > 50, clamp to 50 (remove excessive).
+         const TRIM_LIMIT = 50; 
+         const trim = trimWhitespace(rawRes.canvas.getContext('2d'), rawRes.canvas.width, rawRes.canvas.height, TRIM_LIMIT);
 
-    // 2. Merge Vertical
-    let finalCanvas = partsCanvas[0].canvas;
-    const originalDataUrl = partsCanvas[0].originalDataUrl;
-
-    for (let k = 1; k < partsCanvas.length; k++) {
-         const next = partsCanvas[k];
-         const topCanvas = finalCanvas;
-         const bottomCanvas = next.canvas;
-         const gap = -settings.mergeOverlap;
-
-         // Merge Logic (Inlined)
-         const { context: topCtx } = createSmartCanvas(topCanvas.width, topCanvas.height);
-         topCtx.drawImage(topCanvas, 0, 0);
-         const { context: bottomCtx } = createSmartCanvas(bottomCanvas.width, bottomCanvas.height);
-         bottomCtx.drawImage(bottomCanvas, 0, 0);
-
-         const topV = scanVerticalBounds(topCtx, topCanvas.width, topCanvas.height);
-         const bottomV = scanVerticalBounds(bottomCtx, bottomCanvas.width, bottomCanvas.height);
-
-         const width = Math.max(topCanvas.width, bottomCanvas.width);
-         const height = Math.max(0, topV.h + bottomV.h + gap);
-
-         const { canvas: mergedC, context: mergedCtx } = createSmartCanvas(width, height);
-         mergedCtx.fillStyle = '#ffffff';
-         mergedCtx.fillRect(0, 0, width, height);
-
-         mergedCtx.drawImage(topCanvas, 0, topV.y, topCanvas.width, topV.h, 0, 0, topCanvas.width, topV.h);
-         mergedCtx.drawImage(bottomCanvas, 0, bottomV.y, bottomCanvas.width, bottomV.h, 0, topV.h + gap, bottomCanvas.width, bottomV.h);
+         // Step 3 & 4: Inner Padding & Width Alignment (Right Fill)
+         const padding = settings.canvasPadding;
          
-         finalCanvas = mergedC;
+         const contentW = trim.w;
+         const contentH = trim.h;
+         
+         // Force width to be at least targetWidth (AI Box Width).
+         // If contentW is smaller, we fill right with whitespace.
+         const finalW = Math.max(contentW, Math.floor(targetWidth)) + (padding * 2);
+         const finalH = contentH + (padding * 2);
+
+         const { canvas: partCanvas, context: partCtx } = createSmartCanvas(finalW, finalH);
+         partCtx.fillStyle = '#ffffff';
+         partCtx.fillRect(0, 0, finalW, finalH);
+
+         // Draw aligned to left padding. Right space is automatically white due to fillRect.
+         partCtx.drawImage(
+            rawRes.canvas,
+            trim.x, trim.y, trim.w, trim.h,
+            padding, padding, trim.w, trim.h
+         );
+
+         partsImages.push({ canvas: partCanvas, originalDataUrl: rawRes.originalDataUrl });
     }
 
-    // 3. Export Final
-    const trim = trimWhitespace(finalCanvas.getContext('2d'), finalCanvas.width, finalCanvas.height);
-    const padding = settings.canvasPadding;
+    if (partsImages.length === 0) return null;
 
-    // Calculate Final Target Width
-    // Use the max of [Actual Trimmed Width] and [Global Target Width passed from main thread]
-    // This effectively adds padding to the right if the content is narrower than the column
-    const finalContentWidth = Math.max(trim.w, Math.floor(targetWidth));
+    // Step 5: Merge Continuations (Vertical Stack)
+    let finalCanvas;
+    if (partsImages.length === 1) {
+        finalCanvas = partsImages[0].canvas;
+    } else {
+        const maxW = Math.max(...partsImages.map(p => p.canvas.width));
+        
+        let composedH = 0;
+        partsImages.forEach((p, i) => {
+            if (i === 0) composedH += p.canvas.height;
+            // mergeOverlap is usually positive (amount to overlap), so subtract it
+            else composedH += (p.canvas.height - settings.mergeOverlap); 
+        });
+        
+        const { canvas: mergedC, context: mergedCtx } = createSmartCanvas(maxW, composedH);
+        mergedCtx.fillStyle = '#ffffff';
+        mergedCtx.fillRect(0, 0, maxW, composedH);
+        
+        let yPos = 0;
+        partsImages.forEach((p, i) => {
+            mergedCtx.drawImage(p.canvas, 0, yPos);
+            // Don't apply overlap after the last one
+            yPos += (p.canvas.height - settings.mergeOverlap);
+        });
+        finalCanvas = mergedC;
+    }
 
-    const finalWidth = finalContentWidth + (padding * 2);
-    const finalHeight = trim.h + (padding * 2);
-    
-    const { canvas: exportCanvas, context: exportCtx } = createSmartCanvas(finalWidth, finalHeight);
-    exportCtx.fillStyle = '#ffffff';
-    exportCtx.fillRect(0, 0, finalWidth, finalHeight);
-    
-    exportCtx.drawImage(
-        finalCanvas,
-        trim.x, trim.y, trim.w, trim.h,
-        padding, padding, trim.w, trim.h
-    );
-
-    const blob = await exportCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
+    // Export
+    const blob = await finalCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
     const finalDataUrl = await new Promise(r => {
         const reader = new FileReader();
         reader.onloadend = () => r(reader.result);
@@ -435,7 +435,7 @@ const processLogicalQuestion = async (task, settings, targetWidth = 0) => {
         pageNumber: task.parts[0].pageObj.pageNumber,
         fileName: task.fileId,
         dataUrl: finalDataUrl,
-        originalDataUrl: originalDataUrl
+        originalDataUrl: partsImages[0].originalDataUrl
     };
 };
 
@@ -519,15 +519,13 @@ const generateDebugPreviews = async (sourceDataUrl, boxes, originalWidth, origin
     });
     const stage2 = await canvasToDataURL(s2Canvas);
 
-    // Stage 3: Trim Whitespace
-    // Note: processParts returns the stitched parts. The parts themselves are trimmed, but the
-    // assembled canvas might be wider if some parts were wide and others narrow.
-    // To show a true "tightly trimmed" debug view, we should run trimWhitespace on this result.
-    const result3 = await processParts(sourceDataUrl, boxes, originalWidth, originalHeight, settings);
+    // Stage 3: Trim Whitespace with Threshold (Limit)
+    // We reuse processPartsRaw logic (Step 1) then apply Trim (Step 2) for preview
+    const result3 = await processPartsRaw(sourceDataUrl, boxes, originalWidth, originalHeight, settings);
     let stage3 = '';
     if (result3 && result3.canvas) {
-         // Perform an explicit trim on the stitched result for the preview to ensure it looks "tight"
-         const t = trimWhitespace(result3.canvas.getContext('2d'), result3.canvas.width, result3.canvas.height);
+         // Apply trim with limit (50px)
+         const t = trimWhitespace(result3.canvas.getContext('2d'), result3.canvas.width, result3.canvas.height, 50);
          if (t.w > 0 && t.h > 0) {
             const { canvas: s3C, context: s3Ctx } = createSmartCanvas(t.w, t.h);
             s3Ctx.drawImage(result3.canvas, t.x, t.y, t.w, t.h, 0, 0, t.w, t.h);
@@ -537,27 +535,25 @@ const generateDebugPreviews = async (sourceDataUrl, boxes, originalWidth, origin
          }
     }
     
-    // Stage 4: Aligned (Final)
-    // We reuse logic from processLogicalQuestion's final step
+    // Stage 4: Aligned & Merged (Final)
+    // To show true final output, we should run the full processLogicalQuestion logic for this part
+    // But since debug is usually single-box focused, we mock the "Single Part" flow.
     let stage4 = '';
     if (result3 && result3.canvas) {
-         const finalCanvas = result3.canvas;
-         const trim = trimWhitespace(finalCanvas.getContext('2d'), finalCanvas.width, finalCanvas.height);
+         const t = trimWhitespace(result3.canvas.getContext('2d'), result3.canvas.width, result3.canvas.height, 50);
          const padding = settings.canvasPadding;
-
-         // Apply Global Width Alignment Logic to Stage 4 Preview
-         const finalContentWidth = Math.max(trim.w, Math.floor(targetWidth));
-
+         const finalContentWidth = Math.max(t.w, Math.floor(targetWidth));
          const finalWidth = finalContentWidth + (padding * 2);
-         const finalHeight = trim.h + (padding * 2);
+         const finalHeight = t.h + (padding * 2);
+         
          const { canvas: exportCanvas, context: exportCtx } = createSmartCanvas(finalWidth, finalHeight);
          exportCtx.fillStyle = '#ffffff';
          exportCtx.fillRect(0, 0, finalWidth, finalHeight);
          
          exportCtx.drawImage(
-            finalCanvas,
-            trim.x, trim.y, trim.w, trim.h,
-            padding, padding, trim.w, trim.h
+            result3.canvas,
+            t.x, t.y, t.w, t.h,
+            padding, padding, t.w, t.h
          );
          stage4 = await canvasToDataURL(exportCanvas);
     }
