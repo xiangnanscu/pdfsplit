@@ -49,6 +49,41 @@ export const ProcessingState: React.FC<Props> = ({
     displayPercent = (completedCount / total) * 100;
   }
 
+  // Modal for Completion
+  if (isCompleted) {
+      return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm animate-[fade-in_0.2s_ease-out]">
+            <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 text-center shadow-2xl scale-100 animate-[scale-in_0.2s_cubic-bezier(0.175,0.885,0.32,1.275)] mx-4 border border-slate-100">
+                <div className="w-20 h-20 bg-green-500 text-white rounded-full flex items-center justify-center mb-6 mx-auto shadow-xl shadow-green-200/50">
+                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                </div>
+                <h3 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">Task Finished!</h3>
+                <p className="text-slate-400 font-medium mb-8 text-sm leading-relaxed">All pages have been analyzed and cropped successfully.</p>
+                
+                <div className="grid grid-cols-2 gap-3 w-full mb-8">
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Time Taken</p>
+                    <p className="text-lg font-black text-slate-800 tabular-nums">{elapsedTime}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Items</p>
+                    <p className="text-lg font-black text-slate-800 tabular-nums">{completedCount}</p>
+                    </div>
+                </div>
+
+                <button 
+                    onClick={onClose} 
+                    className="w-full py-3.5 bg-slate-900 text-white font-black rounded-xl shadow-xl hover:bg-slate-800 transition-all active:scale-95 text-xs uppercase tracking-widest"
+                >
+                    OK
+                </button>
+            </div>
+        </div>
+      );
+  }
+
   return (
     <div className={`flex flex-col items-center justify-center p-10 bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 mt-12 w-full max-w-2xl mx-auto transition-all duration-500 relative overflow-hidden animate-[fade-in_0.5s_ease-out]`}>
       
@@ -73,34 +108,6 @@ export const ProcessingState: React.FC<Props> = ({
             <p className="font-medium opacity-80">You manually aborted the process. Partial results may be available below.</p>
           </div>
           <button onClick={onClose} className="px-6 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">Close Panel</button>
-        </div>
-      ) : isCompleted ? (
-        <div className="text-center w-full py-4 flex flex-col items-center">
-          <div className="w-24 h-24 bg-green-500 text-white rounded-full flex items-center justify-center mb-6 shadow-xl shadow-green-100 animate-[scale-in_0.3s_ease-out]">
-            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h3 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Task Finished!</h3>
-          <p className="text-slate-400 font-medium mb-8">All pages have been analyzed and cropped successfully.</p>
-          
-          <div className="grid grid-cols-2 gap-4 w-full max-w-sm mb-8">
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Time Taken</p>
-              <p className="text-xl font-black text-slate-800 tabular-nums">{elapsedTime}</p>
-            </div>
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Items</p>
-              <p className="text-xl font-black text-slate-800 tabular-nums">{completedCount}</p>
-            </div>
-          </div>
-
-          <button 
-            onClick={onClose} 
-            className="px-10 py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl hover:bg-slate-800 transition-all active:scale-95 text-xs uppercase tracking-widest"
-          >
-            Got it, show results
-          </button>
         </div>
       ) : (
         <>
