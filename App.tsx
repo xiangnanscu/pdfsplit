@@ -26,7 +26,6 @@ const App: React.FC = () => {
   const { state, setters, refs, actions } = useExamState();
   
   // 2. Logic Hooks
-  // Extract refreshHistoryList first as it is needed for useFileProcessor and useRefinementActions
   const { handleCleanupAllHistory, handleLoadHistory, handleBatchLoadHistory, handleSyncLegacyData, handleBatchReprocessHistory, refreshHistoryList } = useHistoryActions({ state, setters, refs, actions });
   const { processZipFiles, handleFileChange } = useFileProcessor({ state, setters, refs, actions, refreshHistoryList });
   const { handleRecropFile, executeReanalysis, handleUpdateDetections } = useRefinementActions({ state, setters, actions, refreshHistoryList });
@@ -50,7 +49,7 @@ const App: React.FC = () => {
   const [zippingFile, setZippingFile] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Load History List on Mount using the hook action
+  // Load History List on Mount
   useEffect(() => {
     refreshHistoryList();
   }, []);
@@ -58,8 +57,11 @@ const App: React.FC = () => {
   // Timer Effect
   useEffect(() => {
     let interval: number;
-    const activeStates = [ProcessingStatus.LOADING_PDF, ProcessingStatus.DETECTING_QUESTIONS, ProcessingStatus.CROPPING];
-    if (activeStates.includes(state.status) && state.startTime) {
+    // 只要有开始时间且不是初始状态或错误状态，就运行计时器
+    const shouldRunTimer = state.startTime && 
+      [ProcessingStatus.LOADING_PDF, ProcessingStatus.DETECTING_QUESTIONS, ProcessingStatus.CROPPING].includes(state.status);
+    
+    if (shouldRunTimer) {
       interval = window.setInterval(() => {
         const now = Date.now();
         const diff = Math.floor((now - state.startTime!) / 1000);
@@ -70,6 +72,7 @@ const App: React.FC = () => {
         setters.setElapsedTime(timeStr);
       }, 1000);
     }
+    
     return () => clearInterval(interval);
   }, [state.status, state.startTime]);
 
@@ -118,22 +121,23 @@ const App: React.FC = () => {
     return state.questions.filter(q => q.fileName === state.debugFile);
   }, [state.questions, state.debugFile]);
 
-  // Navigation handlers
-  const currentFileIndex = sortedFileNames.indexOf(state.debugFile || '');
-  const hasNextFile = currentFileIndex !== -1 && currentFileIndex < sortedFileNames.length - 1;
-  const hasPrevFile = currentFileIndex > 0;
-
   const updateDebugFile = (fileName: string | null) => {
      setters.setDebugFile(fileName);
      if (fileName) setters.setLastViewedFile(fileName);
   };
 
   const handleNextFile = () => {
-    if (hasNextFile) updateDebugFile(sortedFileNames[currentFileIndex + 1]);
+    const currentFileIndex = sortedFileNames.indexOf(state.debugFile || '');
+    if (currentFileIndex !== -1 && currentFileIndex < sortedFileNames.length - 1) {
+        updateDebugFile(sortedFileNames[currentFileIndex + 1]);
+    }
   };
 
   const handlePrevFile = () => {
-    if (hasPrevFile) updateDebugFile(sortedFileNames[currentFileIndex - 1]);
+    const currentFileIndex = sortedFileNames.indexOf(state.debugFile || '');
+    if (currentFileIndex > 0) {
+        updateDebugFile(sortedFileNames[currentFileIndex - 1]);
+    }
   };
   
   const handleJumpToIndex = (oneBasedIndex: number) => {
@@ -143,9 +147,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Fully re-process a file (AI Detection + Crop) - Wrapper for Confirmation
-   */
   const handleReanalyzeFile = (fileName: string) => {
     const filePages = state.rawPages.filter(p => p.fileName === fileName);
     if (filePages.length === 0) return;
@@ -160,7 +161,6 @@ const App: React.FC = () => {
     });
   };
 
-  // ZIP Generation Logic
   const generateZip = async (targetFileName?: string) => {
     if (state.questions.length === 0) return;
     const fileNames = targetFileName ? [targetFileName] : sortedFileNames;
@@ -176,22 +176,17 @@ const App: React.FC = () => {
       for (const fileName of fileNames) {
         const fileQs = state.questions.filter(q => q.fileName === fileName);
         if (fileQs.length === 0) continue;
-        
         const fileRawPages = state.rawPages.filter(p => p.fileName === fileName);
         const folder = isBatch ? zip.folder(fileName) : zip;
         if (!folder) continue;
 
-        // Lightweight JSON copy
         const lightweightRawPages = fileRawPages.map(({ dataUrl, ...rest }) => rest);
         folder.file("analysis_data.json", JSON.stringify(lightweightRawPages, null, 2));
         
         const fullPagesFolder = folder.folder("full_pages");
         fileRawPages.forEach((page) => {
           const base64Data = page.dataUrl.split(',')[1];
-          fullPagesFolder?.file(`Page_${page.pageNumber}.jpg`, base64Data, { 
-              base64: true,
-              compression: "STORE" 
-          });
+          fullPagesFolder?.file(`Page_${page.pageNumber}.jpg`, base64Data, { base64: true, compression: "STORE" });
         });
 
         const usedNames = new Set<string>();
@@ -205,30 +200,19 @@ const App: React.FC = () => {
              finalName = `${baseName}_${counter}.jpg`;
           }
           usedNames.add(finalName);
-          folder.file(finalName, base64Data, { 
-              base64: true,
-              compression: "STORE" 
-          });
+          folder.file(finalName, base64Data, { base64: true, compression: "STORE" });
         });
-
-        // Yield to UI
         await new Promise(resolve => setTimeout(resolve, 0));
       }
 
-      const content = await zip.generateAsync({ 
-        type: "blob",
-        compression: "STORE"
-      });
-      
+      const content = await zip.generateAsync({ type: "blob", compression: "STORE" });
       const url = window.URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
       let downloadName = targetFileName ? `${targetFileName}_processed.zip` : isBatch ? "exam_batch_processed.zip" : `${fileNames[0]}_processed.zip`;
-
       link.download = downloadName;
       document.body.appendChild(link);
       link.click();
-      
       await new Promise(resolve => setTimeout(resolve, 1000));
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
@@ -253,12 +237,10 @@ const App: React.FC = () => {
 
   const isWideLayout = state.debugFile !== null || state.questions.length > 0 || state.sourcePages.length > 0;
   const isGlobalProcessing = state.status === ProcessingStatus.LOADING_PDF || state.status === ProcessingStatus.DETECTING_QUESTIONS || state.status === ProcessingStatus.CROPPING;
-  const showInitialUI = state.status === ProcessingStatus.IDLE || (state.status === ProcessingStatus.ERROR && state.sourcePages.length === 0);
+  const showInitialUI = state.status === ProcessingStatus.IDLE && state.sourcePages.length === 0;
 
   return (
     <div className={`min-h-screen px-4 md:px-8 bg-slate-50 relative transition-all duration-300 pb-32`}>
-      
-      {/* Floating Settings Button - Always Visible */}
       <div className="fixed top-6 right-6 z-[100]">
         <button 
           onClick={() => setShowSettings(true)}
@@ -282,30 +264,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Sync Legacy Data Button */}
-        {state.legacySyncFiles.size > 0 && state.status === ProcessingStatus.COMPLETED && !state.debugFile && (
-            <div className="mb-6 flex justify-center animate-fade-in">
-                <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center gap-6 shadow-sm">
-                    <div className="flex items-center gap-3">
-                         <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                         </div>
-                         <div>
-                             <h4 className="font-bold text-slate-800 text-sm">Optimization Available</h4>
-                             <p className="text-xs text-slate-500 font-medium">Save processed images for {state.legacySyncFiles.size} file(s) to history for instant loading next time.</p>
-                         </div>
-                    </div>
-                    <button 
-                        onClick={handleSyncLegacyData}
-                        disabled={state.isSyncingLegacy}
-                        className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-orange-200 active:scale-95 disabled:opacity-50 flex items-center gap-2"
-                    >
-                        {state.isSyncingLegacy ? 'Saving...' : 'Sync to Database'}
-                    </button>
-                </div>
-            </div>
-        )}
-
         <ProcessingState 
           status={state.status} 
           progress={state.progress} 
@@ -319,6 +277,7 @@ const App: React.FC = () => {
           currentRound={state.currentRound}
           failedCount={state.failedCount}
           onAbort={isGlobalProcessing ? actions.handleStop : undefined}
+          onClose={() => setters.setStatus(ProcessingStatus.IDLE)}
         />
         
         {state.debugFile ? (
@@ -330,8 +289,8 @@ const App: React.FC = () => {
                 onNextFile={handleNextFile}
                 onPrevFile={handlePrevFile}
                 onJumpToIndex={handleJumpToIndex}
-                hasNextFile={hasNextFile}
-                hasPrevFile={hasPrevFile}
+                hasNextFile={sortedFileNames.indexOf(state.debugFile) < sortedFileNames.length - 1}
+                hasPrevFile={sortedFileNames.indexOf(state.debugFile) > 0}
                 onUpdateDetections={handleUpdateDetections}
                 onReanalyzeFile={handleReanalyzeFile}
                 onDownloadZip={generateZip}
@@ -339,12 +298,13 @@ const App: React.FC = () => {
                 isZipping={zippingFile !== null}
                 isGlobalProcessing={isGlobalProcessing}
                 processingFiles={state.processingFiles}
-                currentFileIndex={currentFileIndex + 1}
+                currentFileIndex={sortedFileNames.indexOf(state.debugFile) + 1}
                 totalFiles={sortedFileNames.length}
                 cropSettings={state.cropSettings}
             />
         ) : (
-             state.status === ProcessingStatus.COMPLETED && sortedFileNames.length > 0 && (
+             /* 修改条件：只要处理完成且有文件，无论当前状态是否为 IDLE（即点击关闭结算后），都显示列表 */
+             !isGlobalProcessing && sortedFileNames.length > 0 && (
                 <div className="w-full max-w-4xl mx-auto mt-8 animate-fade-in">
                     <div className="flex justify-between items-center mb-6">
                         <div className="flex items-center gap-3">
@@ -387,69 +347,15 @@ const App: React.FC = () => {
                 </div>
              )
         )}
-
       </main>
 
-      <HistorySidebar 
-        isOpen={state.showHistory}
-        onClose={() => setters.setShowHistory(false)}
-        historyList={state.historyList}
-        isLoading={state.isLoadingHistory}
-        loadingText={state.detailedStatus}
-        onLoadHistory={handleLoadHistory}
-        onBatchLoadHistory={handleBatchLoadHistory}
-        onBatchReprocessHistory={handleBatchReprocessHistory}
-        onRefreshList={refreshHistoryList}
-        onCleanupAll={handleCleanupAllHistory}
-      />
-
-      <ConfigurationPanel 
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        selectedModel={state.selectedModel}
-        setSelectedModel={setters.setSelectedModel}
-        concurrency={state.concurrency}
-        setConcurrency={setters.setConcurrency}
-        cropSettings={state.cropSettings}
-        setCropSettings={setters.setCropSettings}
-        useHistoryCache={state.useHistoryCache}
-        setUseHistoryCache={setters.setUseHistoryCache}
-        batchSize={state.batchSize}
-        setBatchSize={setters.setBatchSize}
-      />
-      
+      <HistorySidebar isOpen={state.showHistory} onClose={() => setters.setShowHistory(false)} historyList={state.historyList} isLoading={state.isLoadingHistory} loadingText={state.detailedStatus} onLoadHistory={handleLoadHistory} onBatchLoadHistory={handleBatchLoadHistory} onBatchReprocessHistory={handleBatchReprocessHistory} onRefreshList={refreshHistoryList} onCleanupAll={handleCleanupAllHistory} />
+      <ConfigurationPanel isOpen={showSettings} onClose={() => setShowSettings(false)} selectedModel={state.selectedModel} setSelectedModel={setters.setSelectedModel} concurrency={state.concurrency} setConcurrency={setters.setConcurrency} cropSettings={state.cropSettings} setCropSettings={setters.setCropSettings} useHistoryCache={state.useHistoryCache} setUseHistoryCache={setters.setUseHistoryCache} batchSize={state.batchSize} setBatchSize={setters.setBatchSize} />
       {state.refiningFile && (
-        <RefinementModal 
-          fileName={state.refiningFile}
-          initialSettings={state.cropSettings}
-          status={state.status}
-          onClose={() => setters.setRefiningFile(null)}
-          onApply={(fileName, settings) => {
-             handleRecropFile(fileName, settings);
-             setters.setCropSettings(settings); // Sync global settings to update preview immediately
-          }}
-        />
+        <RefinementModal fileName={state.refiningFile} initialSettings={state.cropSettings} status={state.status} onClose={() => setters.setRefiningFile(null)} onApply={(fileName, settings) => { handleRecropFile(fileName, settings); setters.setCropSettings(settings); }} />
       )}
-
-      {/* Confirmation Dialog for all generic confirms in App level */}
-      <ConfirmDialog 
-        isOpen={confirmState.isOpen}
-        title={confirmState.title}
-        message={confirmState.message}
-        onConfirm={() => {
-            confirmState.action();
-            setConfirmState(prev => ({ ...prev, isOpen: false }));
-        }}
-        onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
-        isDestructive={confirmState.isDestructive}
-        confirmLabel={confirmState.confirmLabel}
-      />
-
-      <NotificationToast 
-        notifications={state.notifications} 
-        onDismiss={(id) => setters.setNotifications(prev => prev.filter(n => n.id !== id))}
-        onView={(fileName) => updateDebugFile(fileName)}
-      />
+      <ConfirmDialog isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={() => { confirmState.action(); setConfirmState(prev => ({ ...prev, isOpen: false })); }} onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))} isDestructive={confirmState.isDestructive} confirmLabel={confirmState.confirmLabel} />
+      <NotificationToast notifications={state.notifications} onDismiss={(id) => setters.setNotifications(prev => prev.filter(n => n.id !== id))} onView={(fileName) => updateDebugFile(fileName)} />
 
       <footer className="mt-24 text-center text-slate-400 text-xs py-12 border-t border-slate-100 font-bold tracking-widest uppercase">
         <p>© 2025 AI Exam Splitter | Precision Tooling</p>

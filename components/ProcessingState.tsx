@@ -15,6 +15,7 @@ interface Props {
   currentRound?: number;
   failedCount?: number;
   onAbort?: () => void;
+  onClose?: () => void;
 }
 
 export const ProcessingState: React.FC<Props> = ({ 
@@ -29,33 +30,38 @@ export const ProcessingState: React.FC<Props> = ({
   elapsedTime = "00:00",
   currentRound = 1,
   failedCount = 0,
-  onAbort
+  onAbort,
+  onClose
 }) => {
-  if (status === ProcessingStatus.IDLE || status === ProcessingStatus.COMPLETED) return null;
+  if (status === ProcessingStatus.IDLE) return null;
 
   const isError = status === ProcessingStatus.ERROR;
   const isStopped = status === ProcessingStatus.STOPPED;
+  const isCompleted = status === ProcessingStatus.COMPLETED;
 
   let displayPercent = 0;
-  if (status === ProcessingStatus.CROPPING && croppingTotal > 0) {
+  if (isCompleted) {
+    displayPercent = 100;
+  } else if (status === ProcessingStatus.CROPPING && croppingTotal > 0) {
     displayPercent = (croppingDone / croppingTotal) * 100;
   } else if (total > 0) {
     displayPercent = (completedCount / total) * 100;
   }
 
   return (
-    <div className="flex flex-col items-center justify-center p-12 bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 mt-12 w-full max-w-2xl mx-auto transition-all duration-500 relative overflow-hidden">
-      {!isError && !isStopped && (
+    <div className={`flex flex-col items-center justify-center p-10 bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 mt-12 w-full max-w-2xl mx-auto transition-all duration-500 relative overflow-hidden animate-[fade-in_0.5s_ease-out]`}>
+      {/* Progress Bar Top */}
+      {!isError && (
         <div className="absolute top-0 left-0 w-full h-1.5 bg-slate-50">
           <div 
-            className={`h-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(37,99,235,0.4)] ${currentRound > 1 ? 'bg-orange-500' : 'bg-blue-600'}`}
+            className={`h-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(37,99,235,0.4)] ${isCompleted ? 'bg-green-500' : currentRound > 1 ? 'bg-orange-500' : 'bg-blue-600'}`}
             style={{ width: `${displayPercent}%` }}
           />
         </div>
       )}
 
       {isError ? (
-        <div className="text-center w-full">
+        <div className="text-center w-full py-4">
           <div className="bg-red-50 text-red-600 p-8 rounded-3xl mb-4 border border-red-100">
             <svg className="w-12 h-12 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -63,9 +69,10 @@ export const ProcessingState: React.FC<Props> = ({
             <h4 className="font-black text-xl mb-2 uppercase tracking-tight">Processing Error</h4>
             <p className="font-medium opacity-80">{error || "An unknown error occurred. Please try again."}</p>
           </div>
+          <button onClick={onClose} className="px-6 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">Dismiss</button>
         </div>
       ) : isStopped ? (
-        <div className="text-center w-full">
+        <div className="text-center w-full py-4">
           <div className="bg-orange-50 text-orange-600 p-8 rounded-3xl mb-4 border border-orange-100">
             <svg className="w-12 h-12 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -73,6 +80,35 @@ export const ProcessingState: React.FC<Props> = ({
             <h4 className="font-black text-xl mb-2 uppercase tracking-tight">Processing Stopped</h4>
             <p className="font-medium opacity-80">You manually aborted the process. Partial results may be available below.</p>
           </div>
+          <button onClick={onClose} className="px-6 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">Close Panel</button>
+        </div>
+      ) : isCompleted ? (
+        <div className="text-center w-full py-4 flex flex-col items-center">
+          <div className="w-24 h-24 bg-green-500 text-white rounded-full flex items-center justify-center mb-6 shadow-xl shadow-green-100 animate-[scale-in_0.3s_ease-out]">
+            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h3 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Task Finished!</h3>
+          <p className="text-slate-400 font-medium mb-8">All pages have been analyzed and cropped successfully.</p>
+          
+          <div className="grid grid-cols-2 gap-4 w-full max-w-sm mb-8">
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Time Taken</p>
+              <p className="text-xl font-black text-slate-800 tabular-nums">{elapsedTime}</p>
+            </div>
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Items</p>
+              <p className="text-xl font-black text-slate-800 tabular-nums">{completedCount}</p>
+            </div>
+          </div>
+
+          <button 
+            onClick={onClose} 
+            className="px-10 py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl hover:bg-slate-800 transition-all active:scale-95 text-xs uppercase tracking-widest"
+          >
+            Got it, show results
+          </button>
         </div>
       ) : (
         <>
@@ -101,7 +137,7 @@ export const ProcessingState: React.FC<Props> = ({
           
           <div className="text-slate-500 font-medium text-center max-w-md min-h-[4em] flex flex-col items-center">
               <>
-                <span className="mb-4 opacity-80 text-sm font-semibold">{detailedStatus}</span>
+                <span className="mb-4 opacity-80 text-sm font-semibold h-5 overflow-hidden">{detailedStatus}</span>
                 
                 <div className="flex flex-wrap items-center justify-center gap-3 text-[10px] font-black uppercase tracking-widest bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100 shadow-sm">
                   {status === ProcessingStatus.DETECTING_QUESTIONS ? (

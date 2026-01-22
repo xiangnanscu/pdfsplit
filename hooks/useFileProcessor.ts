@@ -44,6 +44,8 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
 
   const processZipFiles = async (files: { blob: Blob, name: string }[]) => {
     try {
+      /* 补上计时起点 */
+      setStartTime(Date.now());
       setStatus(ProcessingStatus.LOADING_PDF);
       setDetailedStatus('Reading ZIP contents...');
       const allRawPages: DebugPageData[] = [];
@@ -59,24 +61,27 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
           const loadedZip = await zip.loadAsync(file.blob);
           const analysisFileKeys = Object.keys(loadedZip.files).filter(key => key.match(/(^|\/)analysis_data\.json$/i));
           
-          if (analysisFileKeys.length === 0) continue;
+          if (analysisFileKeys.length === 0) {
+              const pdfKeys = Object.keys(loadedZip.files).filter(k => k.toLowerCase().endsWith('.pdf') && !loadedZip.files[k].dir);
+              if (pdfKeys.length > 0) continue;
+              continue;
+          }
 
           const zipBaseName = file.name.replace(/\.[^/.]+$/, "");
-          const zipRawPages: DebugPageData[] = [];
+          setTotal(analysisFileKeys.length * 5); 
 
           for (const analysisKey of analysisFileKeys) {
               const dirPrefix = analysisKey.substring(0, analysisKey.lastIndexOf("analysis_data.json"));
               const jsonText = await loadedZip.file(analysisKey)!.async('text');
               const loadedRawPages = JSON.parse(jsonText) as DebugPageData[];
               
+              setDetailedStatus(`Extracting data for ${dirPrefix || zipBaseName}...`);
+
               for (const page of loadedRawPages) {
                 let rawFileName = page.fileName;
                 if (!rawFileName || rawFileName === "unknown_file") {
-                  if (dirPrefix) {
-                      rawFileName = dirPrefix.replace(/\/$/, "");
-                  } else {
-                      rawFileName = zipBaseName || "unknown_file";
-                  }
+                  if (dirPrefix) rawFileName = dirPrefix.replace(/\/$/, "");
+                  else rawFileName = zipBaseName || "unknown_file";
                 }
                 page.fileName = rawFileName;
                 
@@ -108,17 +113,17 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
                   const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
                   page.dataUrl = `data:${mime};base64,${base64}`;
                 }
+                setProgress((p: number) => p + 1);
               }
-              zipRawPages.push(...loadedRawPages);
+              allRawPages.push(...loadedRawPages);
           }
           
-          allRawPages.push(...zipRawPages);
-
           const potentialImageKeys = Object.keys(loadedZip.files).filter(k => 
             !loadedZip.files[k].dir && /\.(jpg|jpeg|png)$/i.test(k) && !k.includes('full_pages/')
           );
 
           if (potentialImageKeys.length > 0) {
+            setDetailedStatus(`Linking ${potentialImageKeys.length} question images...`);
             const loadedQuestions: QuestionImage[] = [];
             await Promise.all(potentialImageKeys.map(async (key) => {
                 const base64 = await loadedZip.file(key)!.async('base64');
@@ -127,7 +132,7 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
                 const pathParts = key.split('/');
                 const fileNameWithExt = pathParts[pathParts.length - 1];
                 let qId = "0";
-                let qFileName = zipRawPages.length > 0 ? zipRawPages[0].fileName : "unknown";
+                let qFileName = allRawPages.length > 0 ? allRawPages[0].fileName : "unknown";
 
                 const flatMatch = fileNameWithExt.match(/^(.+)_Q(\d+(?:_\d+)?)\.(jpg|jpeg|png)$/i);
                 if (flatMatch) {
@@ -153,19 +158,19 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
       setRawPages(allRawPages);
       setSourcePages(allRawPages.map(({detections, ...rest}) => rest));
       setTotal(allRawPages.length);
+      setCompletedCount(allRawPages.length);
       
       const uniqueFiles = new Set(allRawPages.map(p => p.fileName));
       
       if (allQuestions.length > 0) {
+        setDetailedStatus('Syncing results...');
         allQuestions.sort((a, b) => {
             if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
             return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
         });
         setQuestions(allQuestions);
-        setCompletedCount(allRawPages.length);
         setStatus(ProcessingStatus.COMPLETED);
 
-        // Save questions to DB
         const savePromises = Array.from(uniqueFiles).map(fileName => {
            const filePages = allRawPages.filter(p => p.fileName === fileName);
            const fileQuestions = allQuestions.filter(q => q.fileName === fileName);
@@ -175,16 +180,23 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
         
       } else {
          if (allRawPages.length > 0) {
-            // Using batchSize for image processing (concurrency variable is for Gemini)
+            setStatus(ProcessingStatus.CROPPING);
+            const totalQs = allRawPages.reduce((acc, p) => acc + p.detections.length, 0);
+            setCroppingTotal(totalQs);
+            setCroppingDone(0);
+            setDetailedStatus('Regenerating question images from extracted data...');
+
             const qs = await generateQuestionsFromRawPages(
                 allRawPages, 
                 cropSettings, 
                 new AbortController().signal,
-                undefined, // no callback for zip load needed usually, or add if wanted
+                {
+                  onProgress: () => setCroppingDone((prev: number) => prev + 1)
+                },
                 batchSize || 10
             );
+            
             setQuestions(qs);
-            setCompletedCount(allRawPages.length);
             setStatus(ProcessingStatus.COMPLETED);
 
             const savePromises = Array.from(uniqueFiles).map(fileName => {
@@ -194,12 +206,10 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
             });
             await Promise.all(savePromises);
          } else {
-            throw new Error("No valid data found in ZIP");
+            throw new Error("No valid data found in ZIP.");
          }
       }
-      
       await refreshHistoryList();
-      
     } catch (err: any) {
       setError("Batch ZIP load failed: " + err.message);
       setStatus(ProcessingStatus.ERROR);
@@ -210,7 +220,6 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
     const fileList = Array.from(e.target.files || []) as File[];
     if (fileList.length === 0) return;
     
-    // Handle ZIPs
     const zipFiles = fileList.filter(f => f.name.toLowerCase().endsWith('.zip'));
     if (zipFiles.length > 0) {
       await processZipFiles(zipFiles.map(f => ({ blob: f, name: f.name })));
@@ -224,7 +233,6 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
     stopRequestedRef.current = false;
     const signal = abortControllerRef.current.signal;
     
-    // Reset State
     setStartTime(Date.now());
     setStatus(ProcessingStatus.LOADING_PDF);
     setError(undefined);
@@ -238,7 +246,6 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
     setFailedCount(0);
     setters.setProcessingFiles(new Set());
     
-    // Reset Queue & Meta
     cropQueueRef.current.clear();
     fileResultsRef.current = {};
     fileCropMetaRef.current = {};
@@ -263,15 +270,12 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
                    cachedQuestions.push(...result.questions);
                }
                loadedFromCache = true;
-               console.log(`Loaded ${fileNameWithoutExt} from history cache.`);
             }
           } catch (err) {
              console.warn(`Failed to load history for ${fileNameWithoutExt}`, err);
           }
         }
-        if (!loadedFromCache) {
-          filesToProcess.push(file);
-        }
+        if (!loadedFromCache) filesToProcess.push(file);
       }
     } else {
        filesToProcess.push(...pdfFiles);
@@ -293,14 +297,12 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
          setSourcePages((prev: any) => [...prev, ...recoveredSourcePages]);
          
          let questionsFromCache = cachedQuestions;
-         
          const cachedFiles = new Set(uniqueCached.map(p => p.fileName));
          const filesWithQs = new Set(cachedQuestions.map(q => q.fileName));
          const filesNeedingGen = Array.from(cachedFiles).filter(f => !filesWithQs.has(f));
 
          if (filesNeedingGen.length > 0) {
              const pagesToGen = uniqueCached.filter(p => filesNeedingGen.includes(p.fileName));
-             // Use batchSize for image processing
              const generated = await generateQuestionsFromRawPages(
                  pagesToGen, 
                  cropSettings, 
@@ -328,22 +330,17 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
 
       const allNewPages: SourcePage[] = [];
       let cumulativeRendered = 0;
-      
       setTotal(cachedRawPages.length + (filesToProcess.length * 3));
 
       for (let fIdx = 0; fIdx < filesToProcess.length; fIdx++) {
          if (signal.aborted || stopRequestedRef.current) break;
          const file = filesToProcess[fIdx];
          const fileName = file.name.replace(/\.[^/.]+$/, "");
-         
          setDetailedStatus(`Rendering (${fIdx + 1}/${filesToProcess.length}): ${file.name}...`);
-         
          const loadingTask = pdfjsLib.getDocument({ data: await file.arrayBuffer() });
          const pdf = await loadingTask.promise;
-         
          cumulativeRendered += pdf.numPages;
          setTotal(cachedRawPages.length + cumulativeRendered + (filesToProcess.length - fIdx - 1) * 3);
-         
          for (let i = 1; i <= pdf.numPages; i++) {
             if (signal.aborted || stopRequestedRef.current) break;
             const page = await pdf.getPage(i);
@@ -359,8 +356,6 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
 
       if (allNewPages.length > 0 && !stopRequestedRef.current && !signal.aborted) {
          setStatus(ProcessingStatus.DETECTING_QUESTIONS);
-         
-         // Meta for detection
          const detectionMeta: Record<string, { totalPages: number, processedPages: number }> = {};
          allNewPages.forEach(p => {
              if (!detectionMeta[p.fileName]) {
@@ -373,131 +368,86 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
 
          let queue = [...allNewPages];
          let round = 1;
-
          while (queue.length > 0) {
              if (stopRequestedRef.current || signal.aborted) break;
-
              setCurrentRound(round);
-             setDetailedStatus(round === 1 
-                ? `Analyzing pages with AI... (Threads: ${concurrency})` 
-                : `Round ${round}: Retrying ${queue.length} failed pages... (Threads: ${concurrency})`);
-             
+             setDetailedStatus(round === 1 ? `Analyzing pages...` : `Round ${round}: Retrying...`);
              const nextRoundQueue: SourcePage[] = [];
              const executing = new Set<Promise<void>>();
-             
              for (const pageData of queue) {
                  if (stopRequestedRef.current || signal.aborted) break;
-
                  const task = (async () => {
                      try {
                          const detections = await detectQuestionsOnPage(pageData.dataUrl, selectedModel);
-                         
                          const resultPage: DebugPageData = {
-                             pageNumber: pageData.pageNumber,
-                             fileName: pageData.fileName,
-                             dataUrl: pageData.dataUrl,
-                             width: pageData.width,
-                             height: pageData.height,
-                             detections
+                             pageNumber: pageData.pageNumber, fileName: pageData.fileName,
+                             dataUrl: pageData.dataUrl, width: pageData.width,
+                             height: pageData.height, detections
                          };
-
                          setRawPages((prev: any) => [...prev, resultPage]);
                          setCompletedCount((prev: number) => prev + 1);
                          setCroppingTotal((prev: number) => prev + detections.length);
-
                          if (detectionMeta[pageData.fileName]) {
                              detectionMeta[pageData.fileName].processedPages++;
                              const dMeta = detectionMeta[pageData.fileName];
-                             
-                             // If file is fully detected, queue its crops
                              if (dMeta.processedPages === dMeta.totalPages) {
-                                 
-                                 // Use functional update to ensure we have all pages for this file
                                  setRawPages((currentRaw: any) => {
                                      const filePages = currentRaw.filter((p: any) => p.fileName === pageData.fileName);
                                      filePages.sort((a: any,b: any) => a.pageNumber - b.pageNumber);
-                                     
-                                     // 1. Prepare tasks
                                      const logicalQs = createLogicalQuestions(filePages);
-                                     
-                                     // Init Crop Meta
-                                     fileCropMetaRef.current[pageData.fileName] = {
-                                         totalQs: logicalQs.length,
-                                         processedQs: 0,
-                                         saved: false
-                                     };
+                                     fileCropMetaRef.current[pageData.fileName] = { totalQs: logicalQs.length, processedQs: 0, saved: false };
                                      fileResultsRef.current[pageData.fileName] = [];
-
-                                     // 2. Add to Global Queue
                                      logicalQs.forEach(lq => {
                                          cropQueueRef.current.enqueue(async () => {
                                             if (signal.aborted) return;
-                                            
                                             const result = await processLogicalQuestion(lq, cropSettings);
                                             if (result) {
-                                                // Update state results immediately for UI
                                                 setQuestions((prevQ: any) => {
                                                     const next = [...prevQ, result];
-                                                    // Basic sort
                                                     return next.sort((a: any,b: any) => {
                                                         if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
                                                         return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
                                                     });
                                                 });
                                                 setCroppingDone((p: number) => p + 1);
-
-                                                // Update file tracking
                                                 const fMeta = fileCropMetaRef.current[pageData.fileName];
                                                 const fRes = fileResultsRef.current[pageData.fileName];
                                                 if (fMeta && fRes) {
                                                     fRes.push(result);
                                                     fMeta.processedQs++;
-                                                    
-                                                    // Check if File Done
                                                     if (fMeta.processedQs >= fMeta.totalQs && !fMeta.saved) {
                                                         fMeta.saved = true;
-                                                        // Save to DB
-                                                        saveExamResult(pageData.fileName, filePages, fRes)
-                                                            .then(() => refreshHistoryList());
+                                                        saveExamResult(pageData.fileName, filePages, fRes).then(() => refreshHistoryList());
                                                     }
                                                 }
                                             }
                                          });
                                      });
-
                                      return currentRaw;
                                  });
                              }
                          }
-
                      } catch (err: any) {
-                         console.warn(`Failed ${pageData.fileName} P${pageData.pageNumber} in Round ${round}`, err);
                          nextRoundQueue.push(pageData);
                          setFailedCount((prev: number) => prev + 1);
                      }
                  })();
-
                  executing.add(task);
                  task.then(() => executing.delete(task));
                  if (executing.size >= concurrency) await Promise.race(executing);
              }
-
              await Promise.all(executing);
-
              if (nextRoundQueue.length > 0 && !stopRequestedRef.current && !signal.aborted) {
                  queue = nextRoundQueue;
                  round++;
                  await new Promise(r => setTimeout(r, 1000));
-             } else {
-                 queue = [];
-             }
+             } else queue = [];
          }
       }
 
       if (stopRequestedRef.current) {
           setStatus(ProcessingStatus.STOPPED);
       } else {
-          // Wait for crop queue to finish before showing completed
           if (cropQueueRef.current.size > 0) {
               setStatus(ProcessingStatus.CROPPING);
               setDetailedStatus("Finalizing crops...");
@@ -505,12 +455,8 @@ export const useFileProcessor = ({ state, setters, refs, actions, refreshHistory
           }
           setStatus(ProcessingStatus.COMPLETED);
       }
-
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-          setStatus(ProcessingStatus.STOPPED);
-          return;
-      }
+      if (err.name === 'AbortError') { setStatus(ProcessingStatus.STOPPED); return; }
       setError(err.message || "Processing failed.");
       setStatus(ProcessingStatus.ERROR);
     }

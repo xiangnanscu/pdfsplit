@@ -14,7 +14,8 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
   const { batchSize, cropSettings, legacySyncFiles, questions, rawPages, concurrency } = state;
   const {
     setStatus, setDetailedStatus, setError, setQuestions, setRawPages, setSourcePages,
-    setTotal, setCompletedCount, setCroppingTotal, setCroppingDone, setLegacySyncFiles, setIsSyncingLegacy
+    setTotal, setCompletedCount, setCroppingTotal, setCroppingDone, setLegacySyncFiles, setIsSyncingLegacy,
+    setStartTime
   } = setters;
   const { abortControllerRef } = refs;
   const { resetState, addNotification } = actions;
@@ -49,6 +50,8 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
 
   const handleBatchReprocessHistory = async (ids: string[]) => {
       setters.setIsLoadingHistory(true);
+      const startTimeLocal = Date.now();
+      setStartTime(startTimeLocal);
       const threads = batchSize || 5;
       
       try {
@@ -72,7 +75,7 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
          let changedImagesCount = 0;
 
          const updateStatus = () => {
-             setDetailedStatus(`${currentFinished}/${totalItems}`);
+             setDetailedStatus(`Processing: ${currentFinished}/${totalItems}`);
          };
 
          updateStatus();
@@ -102,7 +105,6 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
              const fileQuestions = resultsByFile.get(fileName) || [];
              const filePages = allSourcePages.filter(p => p.fileName === fileName);
              
-             // Simple diff count (optional)
              const record = await loadExamResult(id);
              const oldUrls = new Set((record?.questions || []).map(q => q.dataUrl));
              fileQuestions.forEach(q => {
@@ -112,7 +114,16 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
              await reSaveExamResult(fileName, filePages, fileQuestions);
          }
 
-         addNotification(null, "success", `Reprocessed ${totalItems} items across ${ids.length} files. ${changedImagesCount} new images generated.`);
+         const endTime = Date.now();
+         const durationSeconds = (endTime - startTimeLocal) / 1000;
+         const speed = (totalItems / durationSeconds).toFixed(2);
+         const timeFormatted = durationSeconds.toFixed(1);
+
+         addNotification(
+             null, 
+             "success", 
+             `Batch complete: ${totalItems} items in ${timeFormatted}s (${speed} items/sec). ${changedImagesCount} new images created.`
+         );
          await refreshHistoryList();
          
       } catch (e: any) {
@@ -128,6 +139,7 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
     resetState();
     setters.setShowHistory(false);
     setters.setIsLoadingHistory(true);
+    setStartTime(Date.now());
     setStatus(ProcessingStatus.LOADING_PDF);
     setDetailedStatus('Restoring from history...');
 
@@ -193,6 +205,7 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
     resetState();
     setters.setShowHistory(false);
     setters.setIsLoadingHistory(true);
+    setStartTime(Date.now());
     setStatus(ProcessingStatus.LOADING_PDF);
     setDetailedStatus(`Queuing ${ids.length} exams from history...`);
 
