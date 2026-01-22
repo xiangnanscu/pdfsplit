@@ -1,7 +1,7 @@
 
 import { ProcessingStatus, DebugPageData, QuestionImage } from '../types';
 import { loadExamResult, getHistoryList, saveExamResult, updateExamQuestionsOnly, cleanupAllHistory, reSaveExamResult } from '../services/storageService';
-import { generateQuestionsFromRawPages, pMap } from '../services/generationService';
+import { generateQuestionsFromRawPages, pMap, createLogicalQuestions, processLogicalQuestion } from '../services/generationService';
 
 interface HistoryProps {
   state: any;
@@ -31,10 +31,9 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
   const handleCleanupAllHistory = async () => {
       try {
           const removedCount = await cleanupAllHistory();
-          // Callers will need to refresh list manually if needed
           if (removedCount > 0) {
               setDetailedStatus(`Maintenance complete. Cleaned ${removedCount} duplicate pages.`);
-              await refreshHistoryList(); // Refresh list to show updated page counts
+              await refreshHistoryList();
           } else {
               setDetailedStatus(`Maintenance complete. No duplicate pages found.`);
           }
@@ -50,89 +49,75 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
 
   const handleBatchReprocessHistory = async (ids: string[]) => {
       setters.setIsLoadingHistory(true);
-      const totalFiles = ids.length;
-      let filesProcessedCount = 0;
-      let totalQuestionsProcessed = 0;
-      let changedImagesCount = 0;
-
-      // Use user-defined Batch Size for the internal parallel processing items as requested.
-      // This allows the "Batch Process Size" slider to control how many questions are processed in parallel per file.
-      const internalItemConcurrency = batchSize || 5;
-
-      console.log(`Batch Processing: User BatchSize=${internalItemConcurrency}. Strategy: Sequential Files (1) x Parallel Items (${internalItemConcurrency}).`);
-
+      const threads = batchSize || 5;
+      
       try {
+         // 1. Gather all pages from all selected files first
+         const allSourcePages: DebugPageData[] = [];
+         const fileIdToName = new Map<string, string>();
+         
+         setDetailedStatus(`Loading data for ${ids.length} files...`);
+         for (const id of ids) {
+             const record = await loadExamResult(id);
+             if (record) {
+                 allSourcePages.push(...record.rawPages);
+                 fileIdToName.set(id, record.name);
+             }
+         }
+
+         // 2. Flatten all logical questions across ALL files
+         const allLogicalQuestions = createLogicalQuestions(allSourcePages);
+         const totalItems = allLogicalQuestions.length;
+         let currentFinished = 0;
+         let changedImagesCount = 0;
+
          const updateStatus = () => {
-             const percent = totalFiles > 0 ? Math.round((filesProcessedCount / totalFiles) * 100) : 0;
-             setDetailedStatus(`Batch Reprocessing: Completed ${totalQuestionsProcessed} items... (File ${filesProcessedCount + 1}/${totalFiles}) · Threads: ${internalItemConcurrency}`);
+             setDetailedStatus(`${currentFinished}/${totalItems}`);
          };
 
          updateStatus();
 
-         await pMap(ids, async (id) => {
-            // 1. Load record
-            const record = await loadExamResult(id);
-            if (!record) return;
+         // 3. Global parallel processing (Ignore PDF boundaries)
+         const allResults = await pMap(allLogicalQuestions, async (task) => {
+             const res = await processLogicalQuestion(task, cropSettings);
+             currentFinished++;
+             updateStatus();
+             return res;
+         }, threads);
 
-            // 2. Recrop with current settings
-            // Pass 'internalItemConcurrency' to use full CPU power for this single file.
-            // Add onResult callback to update global item progress.
-            const newQuestions = await generateQuestionsFromRawPages(
-               record.rawPages,
-               cropSettings,
-               new AbortController().signal,
-               {
-                 onResult: () => {
-                   totalQuestionsProcessed++;
-                   // Debounce status updates slightly to prevent react churn if super fast
-                   // But for now direct update is fine for visual feedback
-                   updateStatus();
-                 }
-               }, 
-               internalItemConcurrency
-            );
+         const validResults = allResults.filter((r): r is QuestionImage => r !== null);
 
-            // 3. Count changes
-            const oldQuestions = record.questions || [];
-            const oldMap = new Map(oldQuestions.map(q => [`${q.fileName}-${q.id}`, q.dataUrl]));
-            
-            let currentFileChanges = 0;
-            // Check for changed content
-            newQuestions.forEach(nq => {
-                const key = `${nq.fileName}-${nq.id}`;
-                const oldUrl = oldMap.get(key);
-                if (!oldUrl || oldUrl !== nq.dataUrl) {
-                    currentFileChanges++;
-                }
-            });
-            // Check for deleted content
-            const newKeys = new Set(newQuestions.map(q => `${q.fileName}-${q.id}`));
-            oldQuestions.forEach(oq => {
-                 const key = `${oq.fileName}-${oq.id}`;
-                 if (!newKeys.has(key)) {
-                     currentFileChanges++;
-                 }
-            });
-            
-            changedImagesCount += currentFileChanges;
+         // 4. Group results back by file to update database
+         const resultsByFile = new Map<string, QuestionImage[]>();
+         validResults.forEach(q => {
+             if (!resultsByFile.has(q.fileName)) resultsByFile.set(q.fileName, []);
+             resultsByFile.get(q.fileName)!.push(q);
+         });
 
-            // 4. Save Updates
-            await reSaveExamResult(record.name, record.rawPages, newQuestions);
-            
-            filesProcessedCount++;
-            updateStatus();
-            
-            // Critical: Yield to event loop to allow UI render between items in the concurrency pool.
-            await new Promise(resolve => setTimeout(resolve, 0));
+         // 5. Save updates and compare changes
+         for (const id of ids) {
+             const fileName = fileIdToName.get(id);
+             if (!fileName) continue;
 
-         }, 1);
+             const fileQuestions = resultsByFile.get(fileName) || [];
+             const filePages = allSourcePages.filter(p => p.fileName === fileName);
+             
+             // Simple diff count (optional)
+             const record = await loadExamResult(id);
+             const oldUrls = new Set((record?.questions || []).map(q => q.dataUrl));
+             fileQuestions.forEach(q => {
+                 if (!oldUrls.has(q.dataUrl)) changedImagesCount++;
+             });
 
-         addNotification(null, "success", `Reprocessed ${filesProcessedCount} files. ${changedImagesCount} images changed.`);
-         await refreshHistoryList(); // Refreshes metadata if any counts changed
+             await reSaveExamResult(fileName, filePages, fileQuestions);
+         }
+
+         addNotification(null, "success", `Reprocessed ${totalItems} items across ${ids.length} files. ${changedImagesCount} new images generated.`);
+         await refreshHistoryList();
          
       } catch (e: any) {
          console.error(e);
-         addNotification(null, "error", e.message);
+         addNotification(null, "error", `Batch process failed: ${e.message}`);
       } finally {
          setters.setIsLoadingHistory(false);
          setDetailedStatus("");
@@ -193,7 +178,6 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
 
           setQuestions(generatedQuestions);
           setStatus(ProcessingStatus.COMPLETED);
-          
           setLegacySyncFiles(new Set([result.name]));
       }
 
@@ -213,20 +197,17 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
     setDetailedStatus(`Queuing ${ids.length} exams from history...`);
 
     try {
-      const CHUNK_SIZE = batchSize || 10;
+      const CHUNK_SIZE = 10;
       const combinedPages: DebugPageData[] = [];
       const combinedQuestions: QuestionImage[] = [];
       const legacyFilesFound = new Set<string>();
       
       for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
          const chunk = ids.slice(i, i + CHUNK_SIZE);
-         setDetailedStatus(`Restoring data batch ${Math.min(i + CHUNK_SIZE, ids.length)}/${ids.length}...`);
-         
          const results = await Promise.all(chunk.map(id => loadExamResult(id)));
          results.forEach(res => {
             if (res && res.rawPages) {
                 combinedPages.push(...res.rawPages);
-                
                 if (res.questions && res.questions.length > 0) {
                     combinedQuestions.push(...res.questions);
                 } else {
@@ -234,57 +215,30 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
                 }
             }
          });
-         
-         await new Promise(r => setTimeout(r, 10));
       }
 
-      if (combinedPages.length === 0) {
-        throw new Error("No valid data found in selected items.");
-      }
+      if (combinedPages.length === 0) throw new Error("No valid data found.");
 
-      const uniqueMap = new Map<string, DebugPageData>();
-      combinedPages.forEach(p => {
-          const key = `${p.fileName}#${p.pageNumber}`;
-          uniqueMap.set(key, p);
-      });
-
-      const uniquePages = Array.from(uniqueMap.values());
+      const uniquePages = Array.from(new Map(combinedPages.map(p => [`${p.fileName}#${p.pageNumber}`, p])).values());
       uniquePages.sort((a, b) => {
          if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
          return a.pageNumber - b.pageNumber;
       });
 
       setRawPages(uniquePages);
-
-      const recoveredSourcePages = uniquePages.map(rp => ({
-        dataUrl: rp.dataUrl,
-        width: rp.width,
-        height: rp.height,
-        pageNumber: rp.pageNumber,
-        fileName: rp.fileName
-      }));
-      setSourcePages(recoveredSourcePages);
+      setSourcePages(uniquePages.map(rp => ({ dataUrl: rp.dataUrl, width: rp.width, height: rp.height, pageNumber: rp.pageNumber, fileName: rp.fileName })));
 
       if (legacyFilesFound.size > 0) {
           setStatus(ProcessingStatus.CROPPING);
-          setDetailedStatus(`Generating images for ${legacyFilesFound.size} legacy files...`);
-
           const legacyPages = uniquePages.filter(p => legacyFilesFound.has(p.fileName));
-          const totalDetections = legacyPages.reduce((acc, p) => acc + p.detections.length, 0);
-          setCroppingTotal(totalDetections);
+          setCroppingTotal(legacyPages.reduce((acc, p) => acc + p.detections.length, 0));
           setCroppingDone(0);
 
           abortControllerRef.current = new AbortController();
           const generatedLegacyQuestions = await generateQuestionsFromRawPages(
-            legacyPages, 
-            cropSettings, 
-            abortControllerRef.current.signal,
-            {
-                onProgress: () => setCroppingDone((p: number) => p + 1)
-            },
-            concurrency
+            legacyPages, cropSettings, abortControllerRef.current.signal,
+            { onProgress: () => setCroppingDone((p: number) => p + 1) }, concurrency
           );
-          
           setQuestions([...combinedQuestions, ...generatedLegacyQuestions]);
           setLegacySyncFiles(legacyFilesFound);
       } else {
@@ -304,43 +258,21 @@ export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProp
   };
 
   const handleSyncLegacyData = async () => {
-     // Cast legacySyncFiles to Set<string> since it comes from untyped state
      const syncSet = legacySyncFiles as Set<string>;
      if (syncSet.size === 0) return;
-     
      setIsSyncingLegacy(true);
-     setDetailedStatus("Syncing processed images to database...");
-     
      try {
          const history = await getHistoryList();
-         const filesToSync = Array.from(syncSet);
-         
-         await Promise.all(filesToSync.map(async (fileName) => {
+         await Promise.all(Array.from(syncSet).map(async (fileName) => {
              const fileQuestions = questions.filter((q: any) => q.fileName === fileName);
-             if (fileQuestions.length === 0) return;
-
              const historyItem = history.find(h => h.name === fileName);
-             if (historyItem) {
-                 await updateExamQuestionsOnly(historyItem.id, fileQuestions);
-             } else {
-                 const filePages = rawPages.filter((p: any) => p.fileName === fileName);
-                 await saveExamResult(fileName, filePages, fileQuestions);
-             }
+             if (historyItem) await updateExamQuestionsOnly(historyItem.id, fileQuestions);
          }));
-
          setLegacySyncFiles(new Set()); 
-         setDetailedStatus("Sync complete!");
-         addNotification(null, "success", "All images saved to database for future instant loading.");
-         
-         await refreshHistoryList(); // Refresh list after syncing
-         
-         setTimeout(() => {
-             if (state.status === ProcessingStatus.COMPLETED) setDetailedStatus("");
-         }, 3000);
-
+         addNotification(null, "success", "All images saved to database.");
+         await refreshHistoryList();
      } catch (e: any) {
-         console.error(e);
-         setError("Failed to sync legacy data: " + e.message);
+         setError("Sync failed: " + e.message);
      } finally {
          setIsSyncingLegacy(false);
      }
