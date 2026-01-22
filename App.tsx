@@ -113,7 +113,9 @@ const App: React.FC = () => {
 
   const debugPages = useMemo(() => {
     if (!state.debugFile) return [];
-    return state.rawPages.filter(p => p.fileName === state.debugFile);
+    return state.rawPages
+      .filter(p => p.fileName === state.debugFile)
+      .sort((a, b) => a.pageNumber - b.pageNumber); // 确保页面按物理页码排序
   }, [state.rawPages, state.debugFile]);
 
   const debugQuestions = useMemo(() => {
