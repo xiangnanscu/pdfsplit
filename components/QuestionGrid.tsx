@@ -501,7 +501,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                         <div className="flex flex-wrap gap-2 mb-4">
                             <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-xs font-bold border border-blue-100">Difficulty: {selectedImage.analysis.difficulty}/5</span>
                             <span className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-lg text-xs font-bold border border-emerald-100">{selectedImage.analysis.question_type}</span>
-                            <span className="bg-orange-50 text-orange-700 px-3 py-1 rounded-lg text-xs font-bold border border-orange-100">Time: {selectedImage.analysis.suggested_time}</span>
                         </div>
                         
                         {selectedImage.analysis.tags.map((tag, idx) => (
@@ -522,6 +521,15 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                             <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                                 {selectedImage.analysis.analysis_md}
                             </ReactMarkdown>
+
+                            {selectedImage.analysis.breakthrough_md && (
+                              <>
+                                <h3 className="text-lg font-black text-slate-900 border-b pb-2 mb-4 mt-8 text-indigo-600">Breakthrough</h3>
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                    {selectedImage.analysis.breakthrough_md}
+                                </ReactMarkdown>
+                              </>
+                            )}
 
                             <h3 className="text-lg font-black text-slate-900 border-b pb-2 mb-4 mt-8 text-red-600">Pitfalls</h3>
                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>

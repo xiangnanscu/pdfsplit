@@ -15,7 +15,6 @@ export interface DetectedQuestion {
 export interface QuestionAnalysis {
   difficulty: number;
   question_type: string;
-  suggested_time: string;
   tags: {
     level0: string;
     level1: string;
@@ -25,6 +24,7 @@ export interface QuestionAnalysis {
   question_md: string;
   solution_md: string;
   analysis_md: string;
+  breakthrough_md?: string;
   pitfalls_md: string;
 }
 

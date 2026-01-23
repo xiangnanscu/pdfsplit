@@ -1,6 +1,6 @@
 
 import { Type } from "@google/genai";
-import analysisPrompt from './analysis-prompt.js';
+import { analysisPrompt } from './analysis-prompt.js';
 
 export const MODEL_IDS = {
   FLASH: 'gemini-3-flash-preview',
@@ -71,26 +71,26 @@ export const SCHEMAS = {
   ANALYSIS: {
     type: Type.OBJECT,
     properties: {
-      difficulty: { type: Type.INTEGER, description: "1-5, 5 is hardest" },
+      difficulty: { type: Type.INTEGER, description: "1-5, 5为最难" },
       question_type: { type: Type.STRING, description: "选择/填空/解答" },
-      suggested_time: { type: Type.STRING, description: "e.g., '3分钟'" },
       tags: {
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
           properties: {
-             level0: { type: Type.STRING },
-             level1: { type: Type.STRING },
-             level2: { type: Type.STRING },
-             level3: { type: Type.STRING }
+             level0: { type: Type.STRING, description: "必填，例如: '第十一章 立体几何初步'" },
+             level1: { type: Type.STRING, description: "必填，例如: '11.1 空间几何体'" },
+             level2: { type: Type.STRING, description: "可空，例如: '11.1.1 空间几何体与斜二测画法'" },
+             level3: { type: Type.STRING, description: "可空，例如：1. 空间几何体" }
           },
           required: ["level0", "level1"]
         }
       },
-      question_md: { type: Type.STRING, description: "Markdown text of question" },
-      solution_md: { type: Type.STRING, description: "Step by step solution in Markdown/Latex" },
-      analysis_md: { type: Type.STRING, description: "Source analysis and pitfalls" },
-      pitfalls_md: { type: Type.STRING, description: "Common mistakes" }
+      question_md: { type: Type.STRING, description: "题目文本，使用Markdown格式，数学公式使用LaTeX格式。几何图形、异形表格等无法转换的部分忽略即可" },
+      solution_md: { type: Type.STRING, description: "标准解答过程，使用Markdown格式，数学公式使用LaTeX格式" },
+      analysis_md: { type: Type.STRING, description: "考点溯源与思路分析，使用Markdown" },
+      breakthrough_md: { type: Type.STRING, description: "难题的突破口，使用Markdown" },
+      pitfalls_md: { type: Type.STRING, description: "避坑指南，指出易错点，使用Markdown" }
     },
     required: ["difficulty", "question_type", "tags", "question_md", "solution_md", "analysis_md"]
   }

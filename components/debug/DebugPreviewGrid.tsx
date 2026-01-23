@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 import { QuestionImage } from '../../types';
 import ReactMarkdown from 'react-markdown';
@@ -78,9 +79,6 @@ export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100">
                                    {q.analysis.question_type}
                                 </span>
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
-                                   {q.analysis.suggested_time}
-                                </span>
                             </div>
 
                             {/* Markdown Content */}
@@ -99,9 +97,9 @@ export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }
                                     </div>
                                 </div>
 
-                                {/* Analysis & Pitfalls (Grid for wider screens) */}
-                                {(q.analysis.analysis_md || q.analysis.pitfalls_md) && (
-                                    <div className="grid md:grid-cols-2 gap-6 pt-4 border-t border-slate-200/50">
+                                {/* Analysis, Breakthrough & Pitfalls */}
+                                {(q.analysis.analysis_md || q.analysis.breakthrough_md || q.analysis.pitfalls_md) && (
+                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 border-t border-slate-200/50">
                                         {q.analysis.analysis_md && (
                                             <div>
                                                 <h4 className="text-xs font-black text-blue-600 mb-2 flex items-center gap-2">
@@ -111,6 +109,20 @@ export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }
                                                 <div className="prose prose-sm max-w-none prose-blue prose-p:my-1">
                                                     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                                                         {q.analysis.analysis_md}
+                                                    </ReactMarkdown>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {q.analysis.breakthrough_md && (
+                                            <div>
+                                                <h4 className="text-xs font-black text-indigo-600 mb-2 flex items-center gap-2">
+                                                    <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></span>
+                                                    Breakthrough
+                                                </h4>
+                                                <div className="prose prose-sm max-w-none prose-indigo prose-p:my-1">
+                                                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                                        {q.analysis.breakthrough_md}
                                                     </ReactMarkdown>
                                                 </div>
                                             </div>
