@@ -22,6 +22,9 @@ interface Props {
   onDownloadZip?: (fileName: string) => void;
   onRefineFile?: (fileName: string) => void;
   onProcessFile?: (fileName: string) => void;
+  onAnalyzeFile?: (fileName: string) => void; // New
+  analyzingTotal?: number;
+  analyzingDone?: number;
   isZipping?: boolean;
   zippingProgress?: string;
   isGlobalProcessing?: boolean;
@@ -46,6 +49,9 @@ export const DebugRawView: React.FC<Props> = ({
   onDownloadZip,
   onRefineFile,
   onProcessFile,
+  onAnalyzeFile,
+  analyzingTotal,
+  analyzingDone,
   isZipping,
   zippingProgress,
   isGlobalProcessing = false,
@@ -142,14 +148,7 @@ export const DebugRawView: React.FC<Props> = ({
        if (detIndex !== -1) {
            const key = `${q.fileName}||${q.pageNumber}||${detIndex}`;
            setSelectedKey(key);
-           
-           // Optional: Scroll logic could be added here if we had a ref to the page container
-           // But since DebugPageViewer is virtualized or simple scroll, we rely on it rendering the page.
-       } else {
-           // Fallback: Just select the page (deselect any specific box) or first box?
-           // The viewer doesn't support selecting just a page easily without a key format change.
-           // So we do nothing or select index 0 if valid.
-       }
+       } 
     }
   }, [pages]);
 
@@ -331,6 +330,9 @@ export const DebugRawView: React.FC<Props> = ({
          onDownloadZip={!isCurrentFileProcessing && onDownloadZip && title ? () => onDownloadZip(title) : undefined}
          onRefine={!isCurrentFileProcessing && onRefineFile && title ? () => onRefineFile(title) : undefined}
          onProcess={!isCurrentFileProcessing && onProcessFile && title ? () => onProcessFile(title) : undefined}
+         onAnalyze={!isCurrentFileProcessing && onAnalyzeFile && title ? () => onAnalyzeFile(title) : undefined}
+         analyzingTotal={analyzingTotal}
+         analyzingDone={analyzingDone}
          isZipping={isZipping}
          zippingProgress={zippingProgress}
          hasNextFile={hasNextFile}

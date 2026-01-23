@@ -9,6 +9,8 @@ interface Props {
   setSelectedModel: (m: string) => void;
   concurrency: number;
   setConcurrency: (c: number) => void;
+  analysisConcurrency?: number;
+  setAnalysisConcurrency?: (c: number) => void;
   cropSettings: CropSettings;
   setCropSettings: React.Dispatch<React.SetStateAction<CropSettings>>;
   useHistoryCache: boolean;
@@ -21,6 +23,7 @@ export const ConfigurationPanel: React.FC<Props> = ({
   isOpen, onClose,
   selectedModel, setSelectedModel,
   concurrency, setConcurrency,
+  analysisConcurrency = 5, setAnalysisConcurrency,
   cropSettings, setCropSettings,
   useHistoryCache, setUseHistoryCache,
   batchSize, setBatchSize
@@ -77,7 +80,7 @@ export const ConfigurationPanel: React.FC<Props> = ({
                 
                 <div className="space-y-3">
                    <div className="flex justify-between">
-                      <label className="font-bold text-slate-700">Page Analysis Concurrency</label>
+                      <label className="font-bold text-slate-700">Page Detection Concurrency</label>
                       <span className="font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-lg text-xs">{concurrency} Pages</span>
                    </div>
                    <input 
@@ -88,8 +91,25 @@ export const ConfigurationPanel: React.FC<Props> = ({
                       onChange={(e) => setConcurrency(parseInt(e.target.value))}
                       className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600"
                    />
-                   <p className="text-xs text-slate-400 font-medium">Parallel pages sent to AI. Higher values use more quota rate.</p>
                 </div>
+
+                {setAnalysisConcurrency && (
+                  <div className="space-y-3">
+                     <div className="flex justify-between">
+                        <label className="font-bold text-slate-700">Question Analysis Concurrency</label>
+                        <span className="font-black text-purple-600 bg-purple-50 px-3 py-1 rounded-lg text-xs">{analysisConcurrency} Questions</span>
+                     </div>
+                     <input 
+                        type="range" 
+                        min="1" 
+                        max="20" 
+                        value={analysisConcurrency} 
+                        onChange={(e) => setAnalysisConcurrency(parseInt(e.target.value))}
+                        className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                     />
+                     <p className="text-xs text-slate-400 font-medium">Parallel AI requests for solving math problems.</p>
+                  </div>
+                )}
 
                 {setBatchSize && batchSize !== undefined && (
                   <div className="space-y-3">
@@ -109,11 +129,10 @@ export const ConfigurationPanel: React.FC<Props> = ({
                         onChange={(e) => setBatchSize(parseInt(e.target.value))}
                         className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     />
-                    <p className="text-xs text-slate-400 font-medium">Parallel CPU tasks for cropping/stitching. Matches your CPU cores ({detectedCores}) for optimal efficiency.</p>
                   </div>
                 )}
                 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mt-4">
                     <label className="font-bold text-slate-700">Use History Cache</label>
                     <div 
                       className={`w-14 h-8 flex items-center bg-slate-200 rounded-full p-1 cursor-pointer transition-colors ${useHistoryCache ? 'bg-blue-600' : ''}`}

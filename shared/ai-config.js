@@ -45,6 +45,24 @@ export const PROMPTS = {
     "boxes_2d": [ymin, xmin, ymax, xmax]
   }
 ]
+`,
+  ANALYSIS: `# 角色
+你是一个资深的高考数学真题解析专家，帮助考生在考场限定时间内获得尽可能高的分数，现在我给你提供了题目图片和知识点目录，请解析并返回包含有用信息的JSON数据。
+
+# 解析原则
+- 帮助学生通过做题来加深概念的理解，做到学懂弄通、举一反三。
+- 帮助学生揣摩出题人的意图，让学生站在更高的维度思考问题。
+- 注重揭示题目和基本概念之间的联系。
+- 如果有，要明确指出易错点。
+- 针对难题要明确指出突破口。
+- 有时选择题和填空题可以通过代入法、排除法或超纲知识快速锁定正确答案，要优先讲解此类做法。
+
+# 知识点目录 (Reference Only, select appropriate tags)
+第一章 空间向量与立体几何 ... (Use standard Chinese Math Curriculum knowledge tree)
+(Note: Full tree omitted for brevity, verify against standard High School Math curriculum)
+
+# JSON Output Format
+Strictly adhere to the Schema provided in the API call.
 `
 };
 
@@ -65,5 +83,31 @@ export const SCHEMAS = {
       }
     },
     required: ["id", "boxes_2d"]
+  },
+  ANALYSIS: {
+    type: Type.OBJECT,
+    properties: {
+      difficulty: { type: Type.INTEGER, description: "1-5, 5 is hardest" },
+      question_type: { type: Type.STRING, description: "选择/填空/解答" },
+      suggested_time: { type: Type.STRING, description: "e.g., '3分钟'" },
+      tags: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+             level0: { type: Type.STRING },
+             level1: { type: Type.STRING },
+             level2: { type: Type.STRING },
+             level3: { type: Type.STRING }
+          },
+          required: ["level0", "level1"]
+        }
+      },
+      question_md: { type: Type.STRING, description: "Markdown text of question" },
+      solution_md: { type: Type.STRING, description: "Step by step solution in Markdown/Latex" },
+      analysis_md: { type: Type.STRING, description: "Source analysis and pitfalls" },
+      pitfalls_md: { type: Type.STRING, description: "Common mistakes" }
+    },
+    required: ["difficulty", "question_type", "tags", "question_md", "solution_md", "analysis_md"]
   }
 };

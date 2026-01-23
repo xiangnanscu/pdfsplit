@@ -12,12 +12,29 @@ export interface DetectedQuestion {
   boxes_2d: [number, number, number, number] | [number, number, number, number][]; 
 }
 
+export interface QuestionAnalysis {
+  difficulty: number;
+  question_type: string;
+  suggested_time: string;
+  tags: {
+    level0: string;
+    level1: string;
+    level2?: string;
+    level3?: string;
+  }[];
+  question_md: string;
+  solution_md: string;
+  analysis_md: string;
+  pitfalls_md: string;
+}
+
 export interface QuestionImage {
   id: string;
   pageNumber: number;
   fileName: string; // Added to track which PDF this question belongs to
   dataUrl: string;
   originalDataUrl?: string; // Used for "Before/After" comparison if trimming occurred
+  analysis?: QuestionAnalysis; // New optional field
 }
 
 export interface DebugPageData {
@@ -59,6 +76,7 @@ export enum ProcessingStatus {
   LOADING_PDF = 'LOADING_PDF',
   DETECTING_QUESTIONS = 'DETECTING_QUESTIONS',
   CROPPING = 'CROPPING',
+  ANALYZING = 'ANALYZING', // New Status
   COMPLETED = 'COMPLETED',
   ERROR = 'ERROR',
   STOPPED = 'STOPPED'

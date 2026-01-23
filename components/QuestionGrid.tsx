@@ -4,6 +4,9 @@ import JSZip from 'jszip';
 import * as ReactWindow from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { QuestionImage, DebugPageData } from '../types';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 interface Props {
   questions: QuestionImage[];
@@ -94,7 +97,12 @@ const VirtualRow = ({ index, style, data }: ListChildComponentProps) => {
               className="group bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col h-full"
            >
               <div className="px-4 py-2 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Q{q.id}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Q{q.id}</span>
+                    {q.analysis && (
+                        <span className="text-[9px] font-bold text-white bg-purple-500 px-1.5 py-0.5 rounded shadow-sm">AI</span>
+                    )}
+                  </div>
                   {q.originalDataUrl && <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>}
               </div>
               <div 
@@ -124,6 +132,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
   const [zippingProgress, setZippingProgress] = useState<string>('');
   const [selectedImage, setSelectedImage] = useState<QuestionImage | null>(null);
   const [showOriginal, setShowOriginal] = useState(false); 
+  const [showAnalysis, setShowAnalysis] = useState(true);
 
   // Cast imports to any to bypass type errors in some environments
   const List = (ReactWindow as any).VariableSizeList || (ReactWindow as any).default?.VariableSizeList;
@@ -179,6 +188,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
 
   // ZIP Generation Logic
   const generateZip = async (targetFileName?: string) => {
+    // (ZIP logic remains same as original)
     if (questions.length === 0) return;
     const fileNames = targetFileName ? [targetFileName] : Object.keys(groupedQuestions);
     if (fileNames.length === 0) return;
@@ -200,14 +210,21 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
         const folder = isBatch ? zip.folder(fileName) : zip;
         if (!folder) continue;
 
-        // OPTIMIZATION: Create a lightweight copy of rawPages for JSON without the Base64 images
         const lightweightRawPages = fileRawPages.map(({ dataUrl, ...rest }) => rest);
         folder.file("analysis_data.json", JSON.stringify(lightweightRawPages, null, 2));
         
+        // Add Analysis JSON if present
+        const analysisData = fileQs.map(q => ({ 
+            id: q.id, 
+            analysis: q.analysis 
+        })).filter(q => q.analysis);
+        if (analysisData.length > 0) {
+            folder.file("math_analysis.json", JSON.stringify(analysisData, null, 2));
+        }
+
         const fullPagesFolder = folder.folder("full_pages");
         fileRawPages.forEach((page) => {
           const base64Data = page.dataUrl.split(',')[1];
-          // OPTIMIZATION: Use STORE compression for JPEGs to avoid CPU waste
           fullPagesFolder?.file(`Page_${page.pageNumber}.jpg`, base64Data, { 
               base64: true,
               compression: "STORE" 
@@ -225,7 +242,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
              finalName = `${baseName}_${counter}.jpg`;
           }
           usedNames.add(finalName);
-          // OPTIMIZATION: Use STORE compression for JPEGs
           folder.file(finalName, base64Data, { 
               base64: true,
               compression: "STORE" 
@@ -235,15 +251,12 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
         processedCount++;
         if (!targetFileName) {
             setZippingProgress(`Preparing ${processedCount}/${totalCount}`);
-            // Yield to main thread briefly
             await new Promise(resolve => setTimeout(resolve, 0));
         }
       }
 
       setZippingProgress(targetFileName ? 'Packaging...' : 'Packaging 0%');
 
-      // OPTIMIZATION: Use STORE compression globally for speed (10-50x faster for JPEGs)
-      // JSZip is single-threaded, avoiding DEFLATE calculation is the only way to "parallel-like" speeds.
       const content = await zip.generateAsync({ 
         type: "blob",
         compression: "STORE"
@@ -251,8 +264,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
           setZippingProgress(`Packaging ${metadata.percent.toFixed(0)}%`);
       });
       
-      // FIX: Phase 3 Handoff Lag
-      // The button used to reset immediately here, confusing users while browser prepared the download.
       setZippingProgress('Browser preparing download...');
       
       const url = window.URL.createObjectURL(content);
@@ -264,7 +275,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
       document.body.appendChild(link);
       link.click();
       
-      // Give visual feedback that the action was taken, preventing premature reset
       setZippingProgress('Download starting...');
       await new Promise(resolve => setTimeout(resolve, 4000));
 
@@ -272,7 +282,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error("ZIP Error:", err);
-      // Alert removed to prevent sandbox errors
     } finally {
       setZippingFile(null);
       setZippingProgress('');
@@ -302,13 +311,10 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
             <div className="flex gap-3">
               <button 
                   onClick={() => {
-                     // Prioritize lastViewedFile if available
                      if (lastViewedFile) {
                          onDebug(lastViewedFile);
                          return;
                      }
-
-                     // Get the first available file to start debugging (using sorted order)
                      if (sortedFileNames.length > 0) onDebug(sortedFileNames[0]);
                   }}
                   className="group px-6 py-3 rounded-xl font-black transition-all flex items-center justify-center gap-2 shadow-lg min-w-[160px] tracking-tight uppercase text-xs bg-slate-800 text-white hover:bg-slate-700 active:scale-95"
@@ -341,19 +347,16 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
         <div className="flex-1 min-h-0 bg-slate-50/50">
           <AutoSizerAny>
             {({ height, width }: { height: number; width: number }) => {
-              // Determine columns based on width
               let columns = 1;
               if (width >= 640) columns = 2;
               if (width >= 1024) columns = 3;
               if (width >= 1280) columns = 4;
               if (width >= 1536) columns = 5;
 
-              // Compute virtual rows flattened from sorted groups
               const rows: RowData[] = [];
               sortedFileNames.forEach((fileName) => {
                 const fileQs = groupedQuestions[fileName];
                 
-                // Header Row
                 rows.push({
                   type: 'header',
                   fileName,
@@ -362,7 +365,6 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                   totalInFile: fileQs.length
                 });
 
-                // Grid Rows
                 for (let i = 0; i < fileQs.length; i += columns) {
                   rows.push({
                     type: 'grid',
@@ -433,24 +435,38 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
             </button>
           )}
 
-          <div className="relative max-w-7xl w-full h-[95vh] flex flex-col items-center justify-center p-6 md:px-16 md:py-10" onClick={(e) => e.stopPropagation()}>
+          <div className="relative max-w-7xl w-full h-[95vh] flex flex-col p-6 md:px-16 md:py-10" onClick={(e) => e.stopPropagation()}>
             <div className="w-full flex justify-between items-center text-white mb-6">
                <div className="flex flex-col">
-                 <h2 className="text-3xl font-black tracking-tight">Question {selectedImage.id}</h2>
+                 <h2 className="text-3xl font-black tracking-tight flex items-center gap-3">
+                    Question {selectedImage.id}
+                    {selectedImage.analysis && <span className="text-xs bg-purple-600 px-2 py-1 rounded text-white font-bold">AI Analyzed</span>}
+                 </h2>
                  <p className="text-xs font-bold text-white/40 uppercase tracking-[0.2em]">{selectedImage.fileName}</p>
                </div>
-               <button 
-                  className="text-white/40 hover:text-white p-3 transition-colors bg-white/5 rounded-2xl hover:bg-white/10"
-                  onClick={() => setSelectedImage(null)}
-                >
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+               <div className="flex items-center gap-3">
+                 {selectedImage.analysis && (
+                     <button 
+                        onClick={() => setShowAnalysis(!showAnalysis)}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${showAnalysis ? 'bg-white text-slate-900' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                     >
+                        {showAnalysis ? 'Hide Analysis' : 'Show Analysis'}
+                     </button>
+                 )}
+                 <button 
+                    className="text-white/40 hover:text-white p-3 transition-colors bg-white/5 rounded-2xl hover:bg-white/10"
+                    onClick={() => setSelectedImage(null)}
+                  >
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+               </div>
             </div>
             
-            <div className="flex-1 w-full bg-white rounded-3xl overflow-hidden shadow-2xl relative flex flex-col">
-              <div className="relative w-full h-full bg-slate-50 flex items-center justify-center p-12 overflow-auto">
+            <div className="flex-1 w-full bg-white rounded-3xl overflow-hidden shadow-2xl relative flex">
+              {/* Image Side */}
+              <div className={`relative h-full bg-slate-50 flex items-center justify-center p-8 overflow-auto transition-all duration-300 ${showAnalysis && selectedImage.analysis ? 'w-1/2 border-r border-slate-200' : 'w-full'}`}>
                 {selectedImage.originalDataUrl && (
                   <div className="absolute top-6 left-6 z-20">
                     <button 
@@ -477,6 +493,44 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                   className={`max-h-full max-w-full object-contain shadow-2xl transition-all duration-300 ${showOriginal ? 'ring-8 ring-blue-500/20' : ''}`}
                 />
               </div>
+
+              {/* Analysis Side */}
+              {showAnalysis && selectedImage.analysis && (
+                 <div className="w-1/2 h-full overflow-y-auto bg-white p-8 custom-scrollbar">
+                    <div className="space-y-6">
+                        <div className="flex flex-wrap gap-2 mb-4">
+                            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-xs font-bold border border-blue-100">Difficulty: {selectedImage.analysis.difficulty}/5</span>
+                            <span className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-lg text-xs font-bold border border-emerald-100">{selectedImage.analysis.question_type}</span>
+                            <span className="bg-orange-50 text-orange-700 px-3 py-1 rounded-lg text-xs font-bold border border-orange-100">Time: {selectedImage.analysis.suggested_time}</span>
+                        </div>
+                        
+                        {selectedImage.analysis.tags.map((tag, idx) => (
+                            <div key={idx} className="text-xs text-slate-500 mb-2">
+                                <span className="font-bold text-slate-700">{tag.level0}</span> 
+                                {tag.level1 && <span> › {tag.level1}</span>}
+                                {tag.level2 && <span> › {tag.level2}</span>}
+                            </div>
+                        ))}
+
+                        <div className="prose prose-sm prose-slate max-w-none">
+                            <h3 className="text-lg font-black text-slate-900 border-b pb-2 mb-4">Solution</h3>
+                            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {selectedImage.analysis.solution_md}
+                            </ReactMarkdown>
+
+                            <h3 className="text-lg font-black text-slate-900 border-b pb-2 mb-4 mt-8">Analysis</h3>
+                            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {selectedImage.analysis.analysis_md}
+                            </ReactMarkdown>
+
+                            <h3 className="text-lg font-black text-slate-900 border-b pb-2 mb-4 mt-8 text-red-600">Pitfalls</h3>
+                             <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {selectedImage.analysis.pitfalls_md}
+                            </ReactMarkdown>
+                        </div>
+                    </div>
+                 </div>
+              )}
             </div>
             
             <div className="mt-8 flex items-center justify-between w-full max-w-5xl">

@@ -16,6 +16,9 @@ interface Props {
   onDownloadZip?: () => void;
   onRefine?: () => void;
   onProcess?: () => void;
+  onAnalyze?: () => void; // New Prop
+  analyzingTotal?: number; // New Prop
+  analyzingDone?: number; // New Prop
   isZipping?: boolean;
   zippingProgress?: string;
   hasNextFile?: boolean;
@@ -37,6 +40,9 @@ export const DebugToolbar: React.FC<Props> = ({
   onDownloadZip,
   onRefine,
   onProcess,
+  onAnalyze,
+  analyzingTotal = 0,
+  analyzingDone = 0,
   isZipping,
   zippingProgress,
   hasNextFile,
@@ -66,6 +72,8 @@ export const DebugToolbar: React.FC<Props> = ({
       (e.target as HTMLInputElement).blur();
     }
   };
+
+  const isAnalyzing = analyzingTotal > 0 && analyzingDone < analyzingTotal;
 
   return (
     <div className="flex-none h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shadow-xl z-50">
@@ -109,6 +117,29 @@ export const DebugToolbar: React.FC<Props> = ({
               Debug Boxes
             </button>
         </div>
+
+        {onAnalyze && (
+           <button
+             onClick={onAnalyze}
+             disabled={isAnalyzing}
+             className={`px-3 py-2 rounded-xl font-bold text-xs transition-colors flex items-center gap-2 shadow-lg min-w-[100px] justify-center ${
+                 isAnalyzing ? 'bg-purple-900/50 text-purple-200 cursor-wait' : 'bg-purple-600 text-white hover:bg-purple-500 shadow-purple-900/20'
+             }`}
+             title="Analyze all questions in this file with AI"
+           >
+              {isAnalyzing ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span>{analyzingDone}/{analyzingTotal}</span>
+                  </>
+              ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    Analyze AI
+                  </>
+              )}
+           </button>
+        )}
 
         {onProcess && (
            <button

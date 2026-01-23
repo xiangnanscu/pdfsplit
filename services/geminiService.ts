@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { DetectedQuestion } from "../types";
+import { DetectedQuestion, QuestionAnalysis } from "../types";
 import { PROMPTS, SCHEMAS, MODEL_IDS } from "../shared/ai-config.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -9,9 +9,6 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Detects questions on a single image with automatic retry logic.
- * @param image Base64 image string (data:image/jpeg;base64,...)
- * @param modelId 
- * @param maxRetries
  */
 export const detectQuestionsOnPage = async (
   image: string, 
@@ -71,4 +68,59 @@ export const detectQuestionsOnPage = async (
     }
   }
   return [];
+};
+
+/**
+ * Analyzes a single math question image to extract solution, difficulty, etc.
+ */
+export const analyzeQuestion = async (
+  image: string,
+  modelId: string = MODEL_IDS.FLASH,
+  maxRetries: number = 3
+): Promise<QuestionAnalysis> => {
+  let attempt = 0;
+  
+  while (attempt < maxRetries) {
+    try {
+      const promptText = PROMPTS.ANALYSIS;
+      const response = await ai.models.generateContent({
+        model: modelId,
+        contents: [
+          {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: image.split(',')[1]
+                }
+              },
+              { text: promptText }
+            ]
+          }
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: SCHEMAS.ANALYSIS
+        }
+      });
+
+      const text = response.text;
+      if (!text) throw new Error("Empty response from AI Analysis");
+      
+      return JSON.parse(text) as QuestionAnalysis;
+
+    } catch (error: any) {
+      attempt++;
+      const isRateLimit = error?.message?.includes('429') || error?.status === 429;
+      const waitTime = isRateLimit ? Math.pow(2, attempt) * 1000 : 2000;
+      
+      console.warn(`Gemini analysis attempt ${attempt} failed: ${error.message}. Retrying...`);
+      
+      if (attempt >= maxRetries) {
+        throw error;
+      }
+      await delay(waitTime);
+    }
+  }
+  throw new Error("Analysis failed");
 };

@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: CropSettings = {
 export const STORAGE_KEYS = {
   CROP_SETTINGS: 'exam_splitter_crop_settings_v3',
   CONCURRENCY: 'exam_splitter_concurrency_v3',
+  ANALYSIS_CONCURRENCY: 'exam_splitter_analysis_concurrency_v1',
   MODEL: 'exam_splitter_selected_model_v3',
   USE_HISTORY_CACHE: 'exam_splitter_use_history_cache_v1',
   BATCH_SIZE: 'exam_splitter_batch_size_v1'
@@ -20,8 +21,6 @@ export const STORAGE_KEYS = {
 
 // Helper for auto-detect batch size based on RAM and CPU
 export const getAutoBatchSize = (): number => {
-  // Use hardware concurrency to determine optimal batch size for CPU-bound tasks (Canvas operations)
-  // Exceeding core count causes context switching overhead which degrades performance.
   if (typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator) {
     return navigator.hardwareConcurrency || 4;
   }
@@ -72,7 +71,15 @@ export const useExamState = () => {
   const [concurrency, setConcurrency] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CONCURRENCY);
-      // Remove hard cap of 10. Allow up to 128 technically, but user sets it via UI.
+      return saved ? Math.max(1, parseInt(saved, 10)) : 5;
+    } catch {
+      return 5;
+    }
+  });
+  
+  const [analysisConcurrency, setAnalysisConcurrency] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_CONCURRENCY);
       return saved ? Math.max(1, parseInt(saved, 10)) : 5;
     } catch {
       return 5;
@@ -105,6 +112,10 @@ export const useExamState = () => {
   const [croppingTotal, setCroppingTotal] = useState(0);
   const [croppingDone, setCroppingDone] = useState(0);
   
+  // Analysis Progress
+  const [analyzingTotal, setAnalyzingTotal] = useState(0);
+  const [analyzingDone, setAnalyzingDone] = useState(0);
+  
   // Retry / Round
   const [currentRound, setCurrentRound] = useState(1);
   const [failedCount, setFailedCount] = useState(0);
@@ -124,6 +135,10 @@ export const useExamState = () => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CONCURRENCY, concurrency.toString());
   }, [concurrency]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.ANALYSIS_CONCURRENCY, analysisConcurrency.toString());
+  }, [analysisConcurrency]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.BATCH_SIZE, batchSize.toString());
@@ -140,7 +155,6 @@ export const useExamState = () => {
   const addNotification = (fileName: string | null, type: 'success' | 'error', message: string) => {
       const id = Date.now().toString() + Math.random().toString();
       setNotifications(prev => [...prev, { id, fileName, type, message }]);
-      // Auto-dismiss disabled per user request: notifications must be closed manually.
   };
 
   const resetState = () => {
@@ -155,6 +169,8 @@ export const useExamState = () => {
     setCompletedCount(0);
     setCroppingTotal(0);
     setCroppingDone(0);
+    setAnalyzingTotal(0);
+    setAnalyzingDone(0);
     setError(undefined);
     setDetailedStatus('');
     setDebugFile(null);
@@ -183,16 +199,16 @@ export const useExamState = () => {
     state: {
       status, questions, rawPages, sourcePages, debugFile, lastViewedFile, refiningFile,
       legacySyncFiles, isSyncingLegacy, processingFiles, notifications, showHistory,
-      historyList, isLoadingHistory, cropSettings, concurrency, batchSize, selectedModel,
+      historyList, isLoadingHistory, cropSettings, concurrency, analysisConcurrency, batchSize, selectedModel,
       useHistoryCache, progress, total, completedCount, error, detailedStatus,
-      croppingTotal, croppingDone, currentRound, failedCount, startTime, elapsedTime
+      croppingTotal, croppingDone, analyzingTotal, analyzingDone, currentRound, failedCount, startTime, elapsedTime
     },
     setters: {
       setStatus, setQuestions, setRawPages, setSourcePages, setDebugFile, setLastViewedFile, setRefiningFile,
       setLegacySyncFiles, setIsSyncingLegacy, setProcessingFiles, setNotifications, setShowHistory,
-      setHistoryList, setIsLoadingHistory, setCropSettings, setConcurrency, setBatchSize, setSelectedModel,
+      setHistoryList, setIsLoadingHistory, setCropSettings, setConcurrency, setAnalysisConcurrency, setBatchSize, setSelectedModel,
       setUseHistoryCache, setProgress, setTotal, setCompletedCount, setError, setDetailedStatus,
-      setCroppingTotal, setCroppingDone, setCurrentRound, setFailedCount, setStartTime, setElapsedTime
+      setCroppingTotal, setCroppingDone, setAnalyzingTotal, setAnalyzingDone, setCurrentRound, setFailedCount, setStartTime, setElapsedTime
     },
     refs: {
       abortControllerRef,

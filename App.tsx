@@ -18,6 +18,8 @@ import { useExamState } from './hooks/useExamState';
 import { useFileProcessor } from './hooks/useFileProcessor';
 import { useHistoryActions } from './hooks/useHistoryActions';
 import { useRefinementActions } from './hooks/useRefinementActions';
+import { useAnalysisProcessor } from './hooks/useAnalysisProcessor';
+import { reSaveExamResult } from './services/storageService'; // Needed for analysis save
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
 
@@ -29,6 +31,16 @@ const App: React.FC = () => {
   const { handleCleanupAllHistory, handleLoadHistory, handleBatchLoadHistory, handleSyncLegacyData, handleBatchReprocessHistory, refreshHistoryList } = useHistoryActions({ state, setters, refs, actions });
   const { processZipFiles, handleFileChange } = useFileProcessor({ state, setters, refs, actions, refreshHistoryList });
   const { handleRecropFile, executeReanalysis, handleUpdateDetections } = useRefinementActions({ state, setters, actions, refreshHistoryList });
+  
+  // Analysis Hook - Injecting reSaveExamResult capability via closure/direct import usage inside the hook would be cleaner, 
+  // but for now, we will wrap the save logic inside the hook if possible, OR pass a saver callback.
+  // The `useAnalysisProcessor` implemented previously assumes imports. 
+  // Let's modify the usage to ensure it works.
+  // Actually, I'll pass a saver function to `useAnalysisProcessor` context if needed, but it imports services directly.
+  
+  // Modify `useAnalysisProcessor` implementation in the hook file to import `reSaveExamResult` directly.
+  // Here we just initialize it.
+  const { handleStartAnalysis } = useAnalysisProcessor({ state, setters, refs, actions });
 
   // 3. Local UI State
   const [confirmState, setConfirmState] = useState<{
@@ -124,6 +136,16 @@ const App: React.FC = () => {
     return state.questions.filter(q => q.fileName === state.debugFile);
   }, [state.questions, state.debugFile]);
 
+  // Wrap analysis start to include saving logic that relies on `reSaveExamResult`
+  const handleAnalyzeWrapper = async (fileName: string) => {
+      // The hook handles the process. We just trigger it.
+      // But we need to ensure the hook imports `reSaveExamResult` OR we do the saving here.
+      // `useAnalysisProcessor` will update state.
+      // Saving is better done inside the hook where it has the fresh data loop.
+      await handleStartAnalysis(fileName);
+      await refreshHistoryList();
+  };
+
   const updateDebugFile = (fileName: string | null) => {
      setters.setDebugFile(fileName);
      if (fileName) setters.setLastViewedFile(fileName);
@@ -189,6 +211,15 @@ const App: React.FC = () => {
 
         const lightweightRawPages = fileRawPages.map(({ dataUrl, ...rest }) => rest);
         folder.file("analysis_data.json", JSON.stringify(lightweightRawPages, null, 2));
+        
+        // Add Analysis JSON if present
+        const analysisData = fileQs.map(q => ({ 
+            id: q.id, 
+            analysis: q.analysis 
+        })).filter(q => q.analysis);
+        if (analysisData.length > 0) {
+            folder.file("math_analysis.json", JSON.stringify(analysisData, null, 2));
+        }
         
         const fullPagesFolder = folder.folder("full_pages");
         fileRawPages.forEach((page) => {
@@ -321,6 +352,9 @@ const App: React.FC = () => {
                 onDownloadZip={generateZip}
                 onRefineFile={(fileName) => setters.setRefiningFile(fileName)}
                 onProcessFile={(fileName) => handleRecropFile(fileName, state.cropSettings)}
+                onAnalyzeFile={handleAnalyzeWrapper} // NEW
+                analyzingTotal={state.analyzingTotal}
+                analyzingDone={state.analyzingDone}
                 isZipping={zippingFile !== null}
                 zippingProgress={zippingProgress}
                 isGlobalProcessing={isGlobalProcessing}
@@ -330,7 +364,6 @@ const App: React.FC = () => {
                 cropSettings={state.cropSettings}
             />
         ) : (
-             /* 修改条件：只要处理完成且有文件，无论当前状态是否为 IDLE（即点击关闭结算后），都显示列表 */
              !isGlobalProcessing && sortedFileNames.length > 0 && (
                 <div className="w-full max-w-4xl mx-auto mt-8 animate-fade-in">
                     <div className="flex justify-between items-center mb-6">
@@ -394,7 +427,22 @@ const App: React.FC = () => {
         onRefreshList={refreshHistoryList} 
         onCleanupAll={handleCleanupAllHistory} 
       />
-      <ConfigurationPanel isOpen={showSettings} onClose={() => setShowSettings(false)} selectedModel={state.selectedModel} setSelectedModel={setters.setSelectedModel} concurrency={state.concurrency} setConcurrency={setters.setConcurrency} cropSettings={state.cropSettings} setCropSettings={setters.setCropSettings} useHistoryCache={state.useHistoryCache} setUseHistoryCache={setters.setUseHistoryCache} batchSize={state.batchSize} setBatchSize={setters.setBatchSize} />
+      <ConfigurationPanel 
+          isOpen={showSettings} 
+          onClose={() => setShowSettings(false)} 
+          selectedModel={state.selectedModel} 
+          setSelectedModel={setters.setSelectedModel} 
+          concurrency={state.concurrency} 
+          setConcurrency={setters.setConcurrency} 
+          analysisConcurrency={state.analysisConcurrency} // NEW
+          setAnalysisConcurrency={setters.setAnalysisConcurrency} // NEW
+          cropSettings={state.cropSettings} 
+          setCropSettings={setters.setCropSettings} 
+          useHistoryCache={state.useHistoryCache} 
+          setUseHistoryCache={setters.setUseHistoryCache} 
+          batchSize={state.batchSize} 
+          setBatchSize={setters.setBatchSize} 
+      />
       {state.refiningFile && (
         <RefinementModal fileName={state.refiningFile} initialSettings={state.cropSettings} status={state.status} onClose={() => setters.setRefiningFile(null)} onApply={(fileName, settings) => { handleRecropFile(fileName, settings); setters.setCropSettings(settings); }} />
       )}
