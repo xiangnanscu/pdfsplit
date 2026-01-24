@@ -11,6 +11,7 @@ import { HistorySidebar } from "./components/HistorySidebar";
 import { RefinementModal } from "./components/RefinementModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { NotificationToast } from "./components/NotificationToast";
+import packageJson from "./package.json";
 import SyncStatus from "./components/SyncStatus";
 
 // Hooks
@@ -570,7 +571,7 @@ const App: React.FC = () => {
       />
 
       <footer className="mt-24 text-center text-slate-400 text-xs py-12 border-t border-slate-100 font-bold tracking-widest uppercase">
-        <p>© 2025 AI Exam Splitter | Precision Tooling</p>
+        <p>© 2025 AI Exam Splitter | Precision Tooling | v{packageJson.version}</p>
       </footer>
     </div>
   );
