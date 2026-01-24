@@ -6,8 +6,27 @@
 import React from "react";
 import { useSync } from "../hooks/useSync";
 
-const SyncStatus: React.FC = () => {
+interface Props {
+  onSyncComplete?: () => void;
+}
+
+const SyncStatus: React.FC<Props> = ({ onSyncComplete }) => {
   const { status, sync, forceUpload, forceDownload, clearPending } = useSync();
+
+  const handleSync = async () => {
+    await sync();
+    onSyncComplete?.();
+  };
+
+  const handleForceUpload = async () => {
+    await forceUpload();
+    onSyncComplete?.();
+  };
+
+  const handleForceDownload = async () => {
+    await forceDownload();
+    onSyncComplete?.();
+  };
 
   const formatTime = (timestamp: number): string => {
     if (!timestamp) return "从未";
@@ -56,7 +75,7 @@ const SyncStatus: React.FC = () => {
 
       {/* Sync controls */}
       <div className="sync-controls">
-        <button className="sync-button primary" onClick={sync} disabled={status.isSyncing || !status.isOnline}>
+        <button className="sync-button primary" onClick={handleSync} disabled={status.isSyncing || !status.isOnline}>
           {status.isSyncing ? (
             <>
               <span className="spinner" />
@@ -85,7 +104,7 @@ const SyncStatus: React.FC = () => {
 
         <button
           className="sync-button"
-          onClick={forceUpload}
+          onClick={handleForceUpload}
           disabled={status.isSyncing || !status.isOnline}
           title="上传所有本地数据到云端"
         >
@@ -107,7 +126,7 @@ const SyncStatus: React.FC = () => {
 
         <button
           className="sync-button"
-          onClick={forceDownload}
+          onClick={handleForceDownload}
           disabled={status.isSyncing || !status.isOnline}
           title="从云端下载所有数据到本地"
         >

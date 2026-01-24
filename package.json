@@ -21,7 +21,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
-    "db:init": "wrangler d1 execute gksx --file=schema.sql",
+    "postdeploy": "git push",
+    "db:init": "wrangler d1 execute gksx --file=schema.sql --remote",
     "db:init:local": "wrangler d1 execute gksx --local --file=schema.sql"
   },
   "devDependencies": {

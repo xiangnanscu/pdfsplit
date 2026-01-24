@@ -6,6 +6,8 @@ import {
   updateExamQuestionsOnly,
   cleanupAllHistory,
   reSaveExamResult,
+  deleteExamResult,
+  deleteExamResults,
 } from "../services/storageService";
 import {
   generateQuestionsFromRawPages,
@@ -21,20 +23,8 @@ interface HistoryProps {
   actions: any;
 }
 
-export const useHistoryActions = ({
-  state,
-  setters,
-  refs,
-  actions,
-}: HistoryProps) => {
-  const {
-    batchSize,
-    cropSettings,
-    legacySyncFiles,
-    questions,
-    rawPages,
-    concurrency,
-  } = state;
+export const useHistoryActions = ({ state, setters, refs, actions }: HistoryProps) => {
+  const { batchSize, cropSettings, legacySyncFiles, questions, rawPages, concurrency } = state;
   const {
     setStatus,
     setDetailedStatus,
@@ -66,9 +56,7 @@ export const useHistoryActions = ({
     try {
       const removedCount = await cleanupAllHistory();
       if (removedCount > 0) {
-        setDetailedStatus(
-          `Maintenance complete. Cleaned ${removedCount} duplicate pages.`,
-        );
+        setDetailedStatus(`Maintenance complete. Cleaned ${removedCount} duplicate pages.`);
         await refreshHistoryList();
       } else {
         setDetailedStatus(`Maintenance complete. No duplicate pages found.`);
@@ -129,10 +117,8 @@ export const useHistoryActions = ({
             const others = prev.filter((q) => q.fileName !== fileName);
             const combined = [...others, ...generatedQuestions];
             return combined.sort((a, b) => {
-              if (a.fileName !== b.fileName)
-                return a.fileName.localeCompare(b.fileName);
-              if (a.pageNumber !== b.pageNumber)
-                return a.pageNumber - b.pageNumber;
+              if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
+              if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
               return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
             });
           });
@@ -214,10 +200,7 @@ export const useHistoryActions = ({
         setStatus(ProcessingStatus.CROPPING);
         setDetailedStatus("Generating questions from raw data...");
 
-        const totalDetections = uniquePages.reduce(
-          (acc, p) => acc + p.detections.length,
-          0,
-        );
+        const totalDetections = uniquePages.reduce((acc, p) => acc + p.detections.length, 0);
         setCroppingTotal(totalDetections);
         setCroppingDone(0);
         setTotal(uniquePages.length);
@@ -236,11 +219,7 @@ export const useHistoryActions = ({
 
         setQuestions(generatedQuestions);
         const duration = ((Date.now() - startTimeLocal) / 1000).toFixed(1);
-        addNotification(
-          result.name,
-          "success",
-          `Loaded and cropped in ${duration}s`,
-        );
+        addNotification(result.name, "success", `Loaded and cropped in ${duration}s`);
         setStatus(ProcessingStatus.IDLE);
         setLegacySyncFiles(new Set([result.name]));
       }
@@ -280,13 +259,9 @@ export const useHistoryActions = ({
       const legacyFilesFound = new Set<string>();
 
       for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-        setDetailedStatus(
-          `Loading batch ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(ids.length / CHUNK_SIZE)}`,
-        );
+        setDetailedStatus(`Loading batch ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(ids.length / CHUNK_SIZE)}`);
         const chunk = ids.slice(i, i + CHUNK_SIZE);
-        const results = await Promise.all(
-          chunk.map((id) => loadExamResult(id)),
-        );
+        const results = await Promise.all(chunk.map((id) => loadExamResult(id)));
 
         results.forEach((res) => {
           if (res && res.rawPages) {
@@ -305,14 +280,9 @@ export const useHistoryActions = ({
 
       if (combinedPages.length === 0) throw new Error("No valid data found.");
 
-      const uniquePages = Array.from(
-        new Map(
-          combinedPages.map((p) => [`${p.fileName}#${p.pageNumber}`, p]),
-        ).values(),
-      );
+      const uniquePages = Array.from(new Map(combinedPages.map((p) => [`${p.fileName}#${p.pageNumber}`, p])).values());
       uniquePages.sort((a, b) => {
-        if (a.fileName !== b.fileName)
-          return a.fileName.localeCompare(b.fileName);
+        if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
         return a.pageNumber - b.pageNumber;
       });
 
@@ -329,12 +299,8 @@ export const useHistoryActions = ({
 
       if (legacyFilesFound.size > 0) {
         setStatus(ProcessingStatus.CROPPING);
-        const legacyPages = uniquePages.filter((p) =>
-          legacyFilesFound.has(p.fileName),
-        );
-        setCroppingTotal(
-          legacyPages.reduce((acc, p) => acc + p.detections.length, 0),
-        );
+        const legacyPages = uniquePages.filter((p) => legacyFilesFound.has(p.fileName));
+        setCroppingTotal(legacyPages.reduce((acc, p) => acc + p.detections.length, 0));
         setCroppingDone(0);
 
         abortControllerRef.current = new AbortController();
@@ -359,9 +325,7 @@ export const useHistoryActions = ({
       // Auto-navigate to first file (sorted alphabetically)
       const allFiles = Array.from(new Set(uniquePages.map((p) => p.fileName)));
       if (allFiles.length > 0) {
-        allFiles.sort((a, b) =>
-          a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
-        );
+        allFiles.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
         setters.setDebugFile(allFiles[0]);
         setters.setLastViewedFile(allFiles[0]);
       }
@@ -384,12 +348,9 @@ export const useHistoryActions = ({
       const history = await getHistoryList();
       await Promise.all(
         Array.from(syncSet).map(async (fileName) => {
-          const fileQuestions = questions.filter(
-            (q: any) => q.fileName === fileName,
-          );
+          const fileQuestions = questions.filter((q: any) => q.fileName === fileName);
           const historyItem = history.find((h) => h.name === fileName);
-          if (historyItem)
-            await updateExamQuestionsOnly(historyItem.id, fileQuestions);
+          if (historyItem) await updateExamQuestionsOnly(historyItem.id, fileQuestions);
         }),
       );
       setLegacySyncFiles(new Set());
@@ -403,6 +364,83 @@ export const useHistoryActions = ({
     }
   };
 
+  const handleDeleteHistoryItem = async (id: string, name?: string) => {
+    try {
+      let fileName = name;
+
+      // If name not provided, try to look it up
+      if (!fileName) {
+        const list = await getHistoryList();
+        const item = list.find((h) => h.id === id);
+        fileName = item?.name;
+      }
+
+      await deleteExamResult(id);
+
+      if (fileName) {
+        // Clear from active state if matches
+        setQuestions((prev: QuestionImage[]) => prev.filter((q) => q.fileName !== fileName));
+        setRawPages((prev: DebugPageData[]) => prev.filter((p) => p.fileName !== fileName));
+        setSourcePages((prev: any[]) => prev.filter((p: any) => p.fileName !== fileName));
+        setLegacySyncFiles((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(fileName);
+          return next;
+        });
+
+        // If it was the debug file, clear it
+        if (state.debugFile === fileName) {
+          setters.setDebugFile(null);
+        }
+
+        addNotification(null, "success", "Item removed from history and workspace.");
+      }
+
+      await refreshHistoryList();
+    } catch (e: any) {
+      console.error("Failed to delete item", e);
+      setError("Failed to delete item: " + e.message);
+    }
+  };
+
+  const handleBatchDeleteHistoryItems = async (ids: string[]) => {
+    try {
+      // Get names before deleting
+      const list = await getHistoryList();
+      const filesToDelete = new Set<string>();
+      ids.forEach((id) => {
+        const item = list.find((h) => h.id === id);
+        if (item?.name) filesToDelete.add(item.name);
+      });
+
+      await deleteExamResults(ids);
+
+      if (filesToDelete.size > 0) {
+        // Clear from active state if matches
+        setQuestions((prev: QuestionImage[]) => prev.filter((q) => !filesToDelete.has(q.fileName)));
+        setRawPages((prev: DebugPageData[]) => prev.filter((p) => !filesToDelete.has(p.fileName)));
+        setSourcePages((prev: any[]) => prev.filter((p: any) => !filesToDelete.has(p.fileName)));
+        setLegacySyncFiles((prev: Set<string>) => {
+          const next = new Set(prev);
+          filesToDelete.forEach((f) => next.delete(f));
+          return next;
+        });
+
+        // If debug file was deleted, clear it
+        if (state.debugFile && filesToDelete.has(state.debugFile)) {
+          setters.setDebugFile(null);
+        }
+
+        addNotification(null, "success", `${filesToDelete.size} items removed from history and workspace.`);
+      }
+
+      await refreshHistoryList();
+    } catch (e: any) {
+      console.error("Failed to batch delete items", e);
+      setError("Failed to batch delete: " + e.message);
+    }
+  };
+
   return {
     handleCleanupAllHistory,
     handleLoadHistory,
@@ -410,5 +448,7 @@ export const useHistoryActions = ({
     handleSyncLegacyData,
     handleBatchReprocessHistory,
     refreshHistoryList,
+    handleDeleteHistoryItem,
+    handleBatchDeleteHistoryItems,
   };
 };

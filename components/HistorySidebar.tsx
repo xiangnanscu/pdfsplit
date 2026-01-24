@@ -17,6 +17,8 @@ interface Props {
   onBatchReprocessHistory: (ids: string[]) => void;
   onRefreshList: () => void;
   onCleanupAll: () => void;
+  onDeleteHistory: (id: string, name?: string) => Promise<void>;
+  onBatchDelete: (ids: string[]) => Promise<void>;
 }
 
 type SortOption = "name_asc" | "name_desc" | "date_newest" | "date_oldest";
@@ -37,6 +39,8 @@ export const HistorySidebar: React.FC<Props> = ({
   onBatchReprocessHistory,
   onRefreshList,
   onCleanupAll,
+  onDeleteHistory,
+  onBatchDelete,
 }) => {
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set());
   const [isCleaning, setIsCleaning] = useState(false);
@@ -111,9 +115,8 @@ export const HistorySidebar: React.FC<Props> = ({
       message: `Are you sure you want to delete ${selectedHistoryIds.size} records? This action cannot be undone.`,
       isDestructive: true,
       action: async () => {
-        await deleteExamResults(Array.from(selectedHistoryIds));
+        await onBatchDelete(Array.from(selectedHistoryIds));
         setSelectedHistoryIds(new Set());
-        onRefreshList();
         setConfirmState((prev) => ({ ...prev, isOpen: false }));
       },
     });
@@ -133,13 +136,14 @@ export const HistorySidebar: React.FC<Props> = ({
       message: "Are you sure you want to delete this exam history? This action cannot be undone.",
       isDestructive: true,
       action: async () => {
-        await deleteExamResult(id);
+        // Single delete
+        const item = historyList.find((h) => h.id === id);
+        await onDeleteHistory(id, item?.name);
         setSelectedHistoryIds((prev) => {
           const newSet = new Set(prev);
           newSet.delete(id);
           return newSet;
         });
-        onRefreshList();
         setConfirmState((prev) => ({ ...prev, isOpen: false }));
       },
     });
@@ -227,7 +231,7 @@ export const HistorySidebar: React.FC<Props> = ({
 
             <div className="flex flex-col gap-3 pt-2">
               {/* Sync Status Section */}
-              <SyncStatus />
+              <SyncStatus onSyncComplete={onRefreshList} />
 
               {/* Sorting Controls */}
               <div className="flex items-center gap-2">

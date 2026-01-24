@@ -253,12 +253,12 @@ async function handleSaveExam(db, examData) {
     }
   }
 
-  // Insert questions
+  // Insert questions with UPSERT
   if (questions && questions.length > 0) {
     for (const q of questions) {
       statements.push(
         db.prepare(`
-          INSERT INTO questions (id, exam_id, page_number, file_name, data_url, original_data_url, analysis)
+          INSERT OR REPLACE INTO questions (id, exam_id, page_number, file_name, data_url, original_data_url, analysis)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).bind(
           q.id || crypto.randomUUID(),
@@ -343,12 +343,12 @@ async function handleUpdateQuestions(db, examId, questions) {
   // Delete existing questions
   statements.push(db.prepare('DELETE FROM questions WHERE exam_id = ?').bind(examId));
 
-  // Insert new questions
+  // Insert new questions with UPSERT
   if (questions && questions.length > 0) {
     for (const q of questions) {
       statements.push(
         db.prepare(`
-          INSERT INTO questions (id, exam_id, page_number, file_name, data_url, original_data_url, analysis)
+          INSERT OR REPLACE INTO questions (id, exam_id, page_number, file_name, data_url, original_data_url, analysis)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).bind(
           q.id || crypto.randomUUID(),
@@ -549,7 +549,7 @@ async function saveExamToDb(db, examData, source) {
     for (const q of questions) {
       statements.push(
         db.prepare(`
-          INSERT INTO questions (id, exam_id, page_number, file_name, data_url, original_data_url, analysis)
+          INSERT OR REPLACE INTO questions (id, exam_id, page_number, file_name, data_url, original_data_url, analysis)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).bind(
           q.id || crypto.randomUUID(),

@@ -34,13 +34,14 @@ CREATE INDEX IF NOT EXISTS idx_raw_pages_exam_id ON raw_pages(exam_id);
 
 -- Questions table - stores cropped question images with analysis
 CREATE TABLE IF NOT EXISTS questions (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
     exam_id TEXT NOT NULL,
     page_number INTEGER NOT NULL,
     file_name TEXT NOT NULL,
     data_url TEXT NOT NULL,  -- Base64 encoded cropped image
     original_data_url TEXT,  -- Optional, for before/after comparison
     analysis TEXT,           -- JSON object of QuestionAnalysis
+    PRIMARY KEY (exam_id, id),
     FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
 );
 
