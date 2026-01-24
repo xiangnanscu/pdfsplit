@@ -87,10 +87,10 @@ export const SCHEMAS = {
         }
       },
       question_md: { type: Type.STRING, description: "题目文本，必须使用Markdown格式。数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      solution_md: { type: Type.STRING, description: "题目答案。1. 选填题仅给出答案即可。 2. 解答题必须给出完整的、分步的、包含评分标准的标准解答过程（写出'解：'）。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      analysis_md: { type: Type.STRING, description: "思路分析。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      breakthrough_md: { type: Type.STRING, description: "突破口（选填）。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      pitfalls_md: { type: Type.STRING, description: "易错点（选填）。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" }
+      solution_md: { type: Type.STRING, description: "题目答案。1. 选择题给出ABCD字母本身即可，解析写在analysis_md。2.填空题给出答案即可，解析写在analysis_md。3.解答题必须给出完整的、分步的、包含评分标准的解答过程（写出'解：'）。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
+      analysis_md: { type: Type.STRING, description: "解题思路分析。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
+      breakthrough_md: { type: Type.STRING, description: "突破口（选填）。此字段主要针对难题，简单题目可以不写。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
+      pitfalls_md: { type: Type.STRING, description: "易错点（选填）。此字段主要针对易错题，不易错的题目可以不写。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" }
     },
     required: ["difficulty", "question_type", "tags", "question_md", "solution_md", "analysis_md"]
   }
