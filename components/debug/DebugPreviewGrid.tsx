@@ -10,6 +10,14 @@ interface Props {
   onQuestionClick: (q: QuestionImage) => void;
 }
 
+// Helper to clean Gemini markdown output
+// Replace literal "\n" (backslash + n) with double newline for paragraph breaks
+// BUT protect LaTeX commands starting with n (e.g., \nu, \neq, \nabla) by using negative lookahead
+const cleanMd = (text: string | undefined) => {
+  if (!text) return "";
+  return text.replace(/\\n(?![a-z])/g, '\n\n');
+};
+
 export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }) => {
   const sortedQuestions = useMemo(() => {
     return [...questions].sort((a, b) => {
@@ -90,7 +98,7 @@ export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }
                                 <div className="prose prose-sm max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                                     <h4 className="text-sm font-bold text-slate-900 mb-1 border-b border-slate-300 pb-0.5 inline-block">标准解答</h4>
                                     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                        {q.analysis.solution_md}
+                                        {cleanMd(q.analysis.solution_md)}
                                     </ReactMarkdown>
                                 </div>
                                 
@@ -98,7 +106,7 @@ export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }
                                 <div className="prose prose-sm max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                                     <h4 className="text-sm font-bold text-slate-900 mb-1 border-b border-slate-300 pb-0.5 inline-block">思路分析</h4>
                                     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                        {q.analysis.analysis_md}
+                                        {cleanMd(q.analysis.analysis_md)}
                                     </ReactMarkdown>
                                 </div>
 
@@ -107,7 +115,7 @@ export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }
                                     <div className="prose prose-sm max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                                         <h4 className="text-sm font-bold text-slate-900 mb-1 border-b border-slate-300 pb-0.5 inline-block">突破口</h4>
                                         <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                            {q.analysis.breakthrough_md}
+                                            {cleanMd(q.analysis.breakthrough_md)}
                                         </ReactMarkdown>
                                     </div>
                                 )}
@@ -117,7 +125,7 @@ export const DebugPreviewGrid: React.FC<Props> = ({ questions, onQuestionClick }
                                     <div className="prose prose-sm max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                                         <h4 className="text-sm font-bold text-slate-900 mb-1 border-b border-slate-300 pb-0.5 inline-block">易错点</h4>
                                         <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                            {q.analysis.pitfalls_md}
+                                            {cleanMd(q.analysis.pitfalls_md)}
                                         </ReactMarkdown>
                                     </div>
                                 )}

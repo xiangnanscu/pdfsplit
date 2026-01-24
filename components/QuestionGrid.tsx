@@ -46,6 +46,14 @@ interface ListChildComponentProps {
 const ROW_HEIGHT_HEADER = 100;
 const ROW_HEIGHT_GRID = 360;
 
+// Helper to clean Gemini markdown output
+// Replace literal "\n" (backslash + n) with double newline for paragraph breaks
+// BUT protect LaTeX commands starting with n (e.g., \nu, \neq, \nabla) by using negative lookahead
+const cleanMd = (text: string | undefined) => {
+  if (!text) return "";
+  return text.replace(/\\n(?![a-z])/g, '\n\n');
+};
+
 const VirtualRow = ({ index, style, data }: ListChildComponentProps) => {
   const { rows, columns, onDebug, onRefine, generateZip, zippingFile, zippingProgress, setSelectedImage } = data;
   const row = rows[index];
@@ -523,7 +531,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                         <div className="prose prose-base max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                             <h3 className="text-base font-bold text-slate-900 mb-2 border-b-2 border-slate-900 pb-1 inline-block">标准解答</h3>
                             <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                {selectedImage.analysis.solution_md}
+                                {cleanMd(selectedImage.analysis.solution_md)}
                             </ReactMarkdown>
                         </div>
                         
@@ -531,7 +539,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                         <div className="prose prose-base max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                             <h3 className="text-base font-bold text-slate-900 mb-2 border-b-2 border-slate-900 pb-1 inline-block">思路分析</h3>
                             <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                {selectedImage.analysis.analysis_md}
+                                {cleanMd(selectedImage.analysis.analysis_md)}
                             </ReactMarkdown>
                         </div>
 
@@ -540,7 +548,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                           <div className="prose prose-base max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                                 <h3 className="text-base font-bold text-slate-900 mb-2 border-b-2 border-slate-900 pb-1 inline-block">突破口</h3>
                                 <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                    {selectedImage.analysis.breakthrough_md}
+                                    {cleanMd(selectedImage.analysis.breakthrough_md)}
                                 </ReactMarkdown>
                           </div>
                         )}
@@ -550,7 +558,7 @@ export const QuestionGrid: React.FC<Props> = ({ questions, rawPages, onDebug, on
                             <div className="prose prose-base max-w-none prose-slate prose-headings:font-bold prose-headings:text-slate-900 prose-p:text-slate-800">
                                 <h3 className="text-base font-bold text-slate-900 mb-2 border-b-2 border-slate-900 pb-1 inline-block">易错点</h3>
                                 <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                    {selectedImage.analysis.pitfalls_md}
+                                    {cleanMd(selectedImage.analysis.pitfalls_md)}
                                 </ReactMarkdown>
                             </div>
                         )}
