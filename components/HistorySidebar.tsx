@@ -1,11 +1,9 @@
 import React, { useState, useMemo } from "react";
 import { HistoryMetadata } from "../types";
-import {
-  deleteExamResult,
-  deleteExamResults,
-} from "../services/storageService";
+import { deleteExamResult, deleteExamResults } from "../services/storageService";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { CircularProgress } from "./CircularProgress";
+import SyncStatus from "./SyncStatus";
 
 interface Props {
   isOpen: boolean;
@@ -40,9 +38,7 @@ export const HistorySidebar: React.FC<Props> = ({
   onRefreshList,
   onCleanupAll,
 }) => {
-  const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(
-    new Set(),
-  );
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set());
   const [isCleaning, setIsCleaning] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>("name_asc");
 
@@ -134,8 +130,7 @@ export const HistorySidebar: React.FC<Props> = ({
     setConfirmState({
       isOpen: true,
       title: "Delete Record",
-      message:
-        "Are you sure you want to delete this exam history? This action cannot be undone.",
+      message: "Are you sure you want to delete this exam history? This action cannot be undone.",
       isDestructive: true,
       action: async () => {
         await deleteExamResult(id);
@@ -164,20 +159,13 @@ export const HistorySidebar: React.FC<Props> = ({
   return (
     <>
       <div className="fixed inset-0 z-[200] overflow-hidden">
-        <div
-          className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
-          onClick={onClose}
-        ></div>
+        <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose}></div>
         <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-2xl animate-[fade-in_0.3s_ease-out] flex flex-col">
           <div className="p-6 border-b border-slate-100 bg-slate-50">
             <div className="flex justify-between items-start mb-4">
               <div>
-                <h2 className="text-xl font-black text-slate-900 tracking-tight">
-                  Processing History
-                </h2>
-                <p className="text-slate-400 text-xs font-bold mb-2">
-                  Local History (Stored in Browser)
-                </p>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Processing History</h2>
+                <p className="text-slate-400 text-xs font-bold mb-2">Local History (Stored in Browser)</p>
 
                 {false && (
                   <button
@@ -194,11 +182,7 @@ export const HistorySidebar: React.FC<Props> = ({
                   >
                     {isCleaning ? (
                       <>
-                        <svg
-                          className="w-3 h-3 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                           <circle
                             className="opacity-25"
                             cx="12"
@@ -217,12 +201,7 @@ export const HistorySidebar: React.FC<Props> = ({
                       </>
                     ) : (
                       <>
-                        <svg
-                          className="w-3.5 h-3.5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path
                             strokeLinecap="round"
                             strokeLinejoin="round"
@@ -240,18 +219,8 @@ export const HistorySidebar: React.FC<Props> = ({
                 onClick={onClose}
                 className="p-2 text-slate-400 hover:text-slate-600 bg-white rounded-xl border border-slate-200 hover:bg-slate-100 transition-colors"
               >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
@@ -259,9 +228,7 @@ export const HistorySidebar: React.FC<Props> = ({
             <div className="flex flex-col gap-3 pt-2">
               {/* Sorting Controls */}
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase text-slate-400">
-                  Sort By:
-                </span>
+                <span className="text-[10px] font-black uppercase text-slate-400">Sort By:</span>
                 <select
                   value={sortOption}
                   onChange={(e) => setSortOption(e.target.value as SortOption)}
@@ -285,16 +252,11 @@ export const HistorySidebar: React.FC<Props> = ({
                   <input
                     type="checkbox"
                     className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    checked={
-                      sortedHistoryList.length > 0 &&
-                      selectedHistoryIds.size === sortedHistoryList.length
-                    }
+                    checked={sortedHistoryList.length > 0 && selectedHistoryIds.size === sortedHistoryList.length}
                     onChange={handleSelectAllHistory}
                     disabled={sortedHistoryList.length === 0}
                   />
-                  <span className="text-xs font-bold text-slate-500">
-                    Select All
-                  </span>
+                  <span className="text-xs font-bold text-slate-500">Select All</span>
                 </label>
 
                 {selectedHistoryIds.size > 0 && (
@@ -304,12 +266,7 @@ export const HistorySidebar: React.FC<Props> = ({
                       className="text-xs font-bold text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg border border-orange-100 hover:bg-orange-100 transition-colors flex items-center gap-1"
                       title="Reprocess selected files with current crop settings"
                     >
-                      <svg
-                        className="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -320,17 +277,10 @@ export const HistorySidebar: React.FC<Props> = ({
                       Process
                     </button>
                     <button
-                      onClick={() =>
-                        onBatchLoadHistory(Array.from(selectedHistoryIds))
-                      }
+                      onClick={() => onBatchLoadHistory(Array.from(selectedHistoryIds))}
                       className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors flex items-center gap-1"
                     >
-                      <svg
-                        className="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -344,12 +294,7 @@ export const HistorySidebar: React.FC<Props> = ({
                       onClick={handleDeleteSelectedHistory}
                       className="text-xs font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 hover:bg-red-100 transition-colors flex items-center gap-1"
                     >
-                      <svg
-                        className="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -366,6 +311,9 @@ export const HistorySidebar: React.FC<Props> = ({
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+            {/* Sync Status Section */}
+            <SyncStatus />
+
             {sortedHistoryList.length === 0 ? (
               <div className="text-center py-20 text-slate-400">
                 <p className="text-sm font-bold">No history records found.</p>
@@ -392,19 +340,14 @@ export const HistorySidebar: React.FC<Props> = ({
                         className="flex-1 overflow-hidden cursor-pointer"
                         onClick={() => handleToggleHistorySelection(item.id)}
                       >
-                        <h3
-                          className="font-bold text-slate-800 truncate"
-                          title={item.name}
-                        >
+                        <h3 className="font-bold text-slate-800 truncate" title={item.name}>
                           {item.name}
                         </h3>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[10px] font-black uppercase text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
                             {item.pageCount} Pages
                           </span>
-                          <span className="text-[10px] text-slate-400">
-                            {formatDate(item.timestamp)}
-                          </span>
+                          <span className="text-[10px] text-slate-400">{formatDate(item.timestamp)}</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
@@ -413,12 +356,7 @@ export const HistorySidebar: React.FC<Props> = ({
                           className="text-slate-300 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
                           title="Delete"
                         >
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path
                               strokeLinecap="round"
                               strokeLinejoin="round"
@@ -433,12 +371,7 @@ export const HistorySidebar: React.FC<Props> = ({
                       onClick={() => onLoadHistory(item.id)}
                       className="w-full py-2.5 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
                     >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"

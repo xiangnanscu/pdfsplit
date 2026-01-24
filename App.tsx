@@ -11,6 +11,7 @@ import { HistorySidebar } from "./components/HistorySidebar";
 import { RefinementModal } from "./components/RefinementModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { NotificationToast } from "./components/NotificationToast";
+import SyncStatus from "./components/SyncStatus";
 
 // Hooks
 import { useExamState } from "./hooks/useExamState";
@@ -18,10 +19,10 @@ import { useFileProcessor } from "./hooks/useFileProcessor";
 import { useHistoryActions } from "./hooks/useHistoryActions";
 import { useRefinementActions } from "./hooks/useRefinementActions";
 import { useAnalysisProcessor } from "./hooks/useAnalysisProcessor";
+import { useSync } from "./hooks/useSync";
 import { reSaveExamResult } from "./services/storageService"; // Needed for analysis save
 
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
 
 const App: React.FC = () => {
   // 1. State Hook
@@ -43,8 +44,12 @@ const App: React.FC = () => {
     actions,
     refreshHistoryList,
   });
-  const { handleRecropFile, executeReanalysis, handleUpdateDetections } =
-    useRefinementActions({ state, setters, actions, refreshHistoryList });
+  const { handleRecropFile, executeReanalysis, handleUpdateDetections } = useRefinementActions({
+    state,
+    setters,
+    actions,
+    refreshHistoryList,
+  });
 
   // Analysis Hook
   const { handleStartAnalysis } = useAnalysisProcessor({
@@ -53,6 +58,9 @@ const App: React.FC = () => {
     refs,
     actions,
   });
+
+  // Sync Hook - Initialize sync service
+  const syncHook = useSync();
 
   // 3. Local UI State
   const [confirmState, setConfirmState] = useState<{
@@ -94,11 +102,9 @@ const App: React.FC = () => {
     // 只要有开始时间且不是初始状态或错误状态，就运行计时器
     const shouldRunTimer =
       state.startTime &&
-      [
-        ProcessingStatus.LOADING_PDF,
-        ProcessingStatus.DETECTING_QUESTIONS,
-        ProcessingStatus.CROPPING,
-      ].includes(state.status);
+      [ProcessingStatus.LOADING_PDF, ProcessingStatus.DETECTING_QUESTIONS, ProcessingStatus.CROPPING].includes(
+        state.status,
+      );
 
     if (shouldRunTimer) {
       interval = window.setInterval(() => {
@@ -126,8 +132,7 @@ const App: React.FC = () => {
           setters.setStatus(ProcessingStatus.LOADING_PDF);
           setters.setDetailedStatus(`Downloading: ${zipUrl}`);
           const response = await fetch(zipUrl);
-          if (!response.ok)
-            throw new Error(`Fetch failed (Status: ${response.status})`);
+          if (!response.ok) throw new Error(`Fetch failed (Status: ${response.status})`);
           const blob = await response.blob();
           const fileName = zipUrl.split("/").pop() || "remote_debug.zip";
           await processZipFiles([{ blob, name: fileName }]);
@@ -146,16 +151,12 @@ const App: React.FC = () => {
   }, [state.rawPages]);
 
   const sortedFileNames = useMemo(() => {
-    return uniqueFileNames.sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
-    );
+    return uniqueFileNames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
   }, [uniqueFileNames]);
 
   const debugPages = useMemo(() => {
     if (!state.debugFile) return [];
-    return state.rawPages
-      .filter((p) => p.fileName === state.debugFile)
-      .sort((a, b) => a.pageNumber - b.pageNumber); // 确保页面按物理页码排序
+    return state.rawPages.filter((p) => p.fileName === state.debugFile).sort((a, b) => a.pageNumber - b.pageNumber); // 确保页面按物理页码排序
   }, [state.rawPages, state.debugFile]);
 
   const debugQuestions = useMemo(() => {
@@ -191,10 +192,7 @@ const App: React.FC = () => {
 
   const handleNextFile = () => {
     const currentFileIndex = sortedFileNames.indexOf(state.debugFile || "");
-    if (
-      currentFileIndex !== -1 &&
-      currentFileIndex < sortedFileNames.length - 1
-    ) {
+    if (currentFileIndex !== -1 && currentFileIndex < sortedFileNames.length - 1) {
       updateDebugFile(sortedFileNames[currentFileIndex + 1]);
     }
   };
@@ -221,8 +219,7 @@ const App: React.FC = () => {
       isOpen: true,
       title: "Re-analyze File?",
       message: `Are you sure you want to re-analyze "${fileName}"?\n\nThis will consume AI quota and overwrite any manual edits for this file.`,
-      action: () =>
-        executeReanalysis(fileName).then(() => refreshHistoryList()),
+      action: () => executeReanalysis(fileName).then(() => refreshHistoryList()),
       isDestructive: true,
       confirmLabel: "Re-analyze",
     });
@@ -247,19 +244,12 @@ const App: React.FC = () => {
       for (const fileName of fileNames) {
         const fileQs = state.questions.filter((q) => q.fileName === fileName);
         if (fileQs.length === 0) continue;
-        const fileRawPages = state.rawPages.filter(
-          (p) => p.fileName === fileName,
-        );
+        const fileRawPages = state.rawPages.filter((p) => p.fileName === fileName);
         const folder = isBatch ? zip.folder(fileName) : zip;
         if (!folder) continue;
 
-        const lightweightRawPages = fileRawPages.map(
-          ({ dataUrl, ...rest }) => rest,
-        );
-        folder.file(
-          "analysis_data.json",
-          JSON.stringify(lightweightRawPages, null, 2),
-        );
+        const lightweightRawPages = fileRawPages.map(({ dataUrl, ...rest }) => rest);
+        folder.file("analysis_data.json", JSON.stringify(lightweightRawPages, null, 2));
 
         // Add Analysis JSON if present
         const analysisData = fileQs
@@ -269,10 +259,7 @@ const App: React.FC = () => {
           }))
           .filter((q) => q.analysis);
         if (analysisData.length > 0) {
-          folder.file(
-            "math_analysis.json",
-            JSON.stringify(analysisData, null, 2),
-          );
+          folder.file("math_analysis.json", JSON.stringify(analysisData, null, 2));
         }
 
         const fullPagesFolder = folder.folder("full_pages");
@@ -340,11 +327,7 @@ const App: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error("ZIP Error:", err);
-      actions.addNotification(
-        "ZIP Error",
-        "error",
-        "Failed to create zip file.",
-      );
+      actions.addNotification("ZIP Error", "error", "Failed to create zip file.");
     } finally {
       setZippingFile(null);
       setZippingProgress("");
@@ -362,21 +345,15 @@ const App: React.FC = () => {
     });
   };
 
-  const isWideLayout =
-    state.debugFile !== null ||
-    state.questions.length > 0 ||
-    state.sourcePages.length > 0;
+  const isWideLayout = state.debugFile !== null || state.questions.length > 0 || state.sourcePages.length > 0;
   const isGlobalProcessing =
     state.status === ProcessingStatus.LOADING_PDF ||
     state.status === ProcessingStatus.DETECTING_QUESTIONS ||
     state.status === ProcessingStatus.CROPPING;
-  const showInitialUI =
-    state.status === ProcessingStatus.IDLE && state.sourcePages.length === 0;
+  const showInitialUI = state.status === ProcessingStatus.IDLE && state.sourcePages.length === 0;
 
   return (
-    <div
-      className={`min-h-screen px-4 md:px-8 bg-slate-50 relative transition-all duration-300 pb-32`}
-    >
+    <div className={`min-h-screen px-4 md:px-8 bg-slate-50 relative transition-all duration-300 pb-32`}>
       <div className="fixed top-6 right-6 z-[100]">
         <button
           onClick={() => setShowSettings(true)}
@@ -395,12 +372,7 @@ const App: React.FC = () => {
               strokeWidth={2}
               d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c-.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
             />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
       </div>
@@ -411,9 +383,7 @@ const App: React.FC = () => {
         showReset={state.sourcePages.length > 0 && !isGlobalProcessing}
       />
 
-      <main
-        className={`mx-auto transition-all duration-300 ${isWideLayout ? "w-full max-w-[98vw]" : "max-w-4xl"}`}
-      >
+      <main className={`mx-auto transition-all duration-300 ${isWideLayout ? "w-full max-w-[98vw]" : "max-w-4xl"}`}>
         {showInitialUI && (
           <div className="space-y-8 animate-fade-in">
             <UploadSection onFileChange={handleFileChange} />
@@ -445,18 +415,13 @@ const App: React.FC = () => {
             onNextFile={handleNextFile}
             onPrevFile={handlePrevFile}
             onJumpToIndex={handleJumpToIndex}
-            hasNextFile={
-              sortedFileNames.indexOf(state.debugFile) <
-              sortedFileNames.length - 1
-            }
+            hasNextFile={sortedFileNames.indexOf(state.debugFile) < sortedFileNames.length - 1}
             hasPrevFile={sortedFileNames.indexOf(state.debugFile) > 0}
             onUpdateDetections={handleUpdateDetections}
             onReanalyzeFile={handleReanalyzeFile}
             onDownloadZip={generateZip}
             onRefineFile={(fileName) => setters.setRefiningFile(fileName)}
-            onProcessFile={(fileName) =>
-              handleRecropFile(fileName, state.cropSettings)
-            }
+            onProcessFile={(fileName) => handleRecropFile(fileName, state.cropSettings)}
             onAnalyzeFile={handleAnalyzeWrapper}
             analyzingTotal={state.analyzingTotal}
             analyzingDone={state.analyzingDone}
@@ -476,12 +441,9 @@ const App: React.FC = () => {
             <div className="w-full max-w-4xl mx-auto mt-8 animate-fade-in">
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center gap-3">
-                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                    Processed Files
-                  </h2>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Processed Files</h2>
                   <span className="bg-slate-100 text-slate-500 px-3 py-1 rounded-lg text-xs font-bold border border-slate-200 shadow-sm">
-                    {sortedFileNames.length} Files · {state.rawPages.length}{" "}
-                    Pages
+                    {sortedFileNames.length} Files · {state.rawPages.length} Pages
                   </span>
                 </div>
                 <button
@@ -491,11 +453,7 @@ const App: React.FC = () => {
                 >
                   {zippingFile === "ALL" ? (
                     <>
-                      <svg
-                        className="animate-spin w-4 h-4 text-white/50"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="animate-spin w-4 h-4 text-white/50" fill="none" viewBox="0 0 24 24">
                         <circle
                           className="opacity-25"
                           cx="12"
@@ -532,12 +490,7 @@ const App: React.FC = () => {
                           {fileName}
                         </h3>
                         <p className="text-xs text-slate-400 font-medium">
-                          {
-                            state.questions.filter(
-                              (q) => q.fileName === fileName,
-                            ).length
-                          }{" "}
-                          Questions Extracted
+                          {state.questions.filter((q) => q.fileName === fileName).length} Questions Extracted
                         </p>
                       </div>
                     </div>
@@ -561,9 +514,7 @@ const App: React.FC = () => {
         historyList={state.historyList}
         isLoading={state.isLoadingHistory}
         loadingText={state.detailedStatus}
-        progress={
-          state.total > 0 ? (state.completedCount / state.total) * 100 : 0
-        }
+        progress={state.total > 0 ? (state.completedCount / state.total) * 100 : 0}
         onLoadHistory={handleLoadHistory}
         onBatchLoadHistory={handleBatchLoadHistory}
         onBatchReprocessHistory={handleBatchReprocessHistory}
@@ -614,9 +565,7 @@ const App: React.FC = () => {
       />
       <NotificationToast
         notifications={state.notifications}
-        onDismiss={(id) =>
-          setters.setNotifications((prev) => prev.filter((n) => n.id !== id))
-        }
+        onDismiss={(id) => setters.setNotifications((prev) => prev.filter((n) => n.id !== id))}
         onView={(fileName) => updateDebugFile(fileName)}
       />
 

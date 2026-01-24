@@ -9,8 +9,7 @@ import * as storageService from "./storageService";
 // Get API URL from environment or use default
 const getApiUrl = (): string => {
   // @ts-ignore - Vite injects import.meta.env
-  const envUrl =
-    typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL;
+  const envUrl = typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL;
   return envUrl || "/api";
 };
 
@@ -114,10 +113,7 @@ const updateOnlineStatus = (isOnline: boolean): void => {
 /**
  * Make API request with error handling
  */
-async function apiRequest<T>(
-  endpoint: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${SYNC_CONFIG.apiBaseUrl}${endpoint}`;
 
   const response = await fetch(url, {
@@ -129,9 +125,7 @@ async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ error: "Request failed" }));
+    const error = await response.json().catch(() => ({ error: "Request failed" }));
     throw new Error(error.error || `HTTP ${response.status}`);
   }
 
@@ -224,9 +218,7 @@ export const deleteRemoteExams = async (ids: string[]): Promise<boolean> => {
  */
 const addPendingAction = (action: PendingAction): void => {
   // Remove any existing action for the same exam
-  syncState.pendingActions = syncState.pendingActions.filter(
-    (a) => a.examId !== action.examId,
-  );
+  syncState.pendingActions = syncState.pendingActions.filter((a) => a.examId !== action.examId);
   syncState.pendingActions.push(action);
   saveSyncState();
 };
@@ -258,18 +250,14 @@ export const syncToRemote = async (): Promise<SyncResult> => {
         const success = await saveRemoteExam(action.data);
         if (success) {
           result.pushed++;
-          syncState.pendingActions = syncState.pendingActions.filter(
-            (a) => a.examId !== action.examId,
-          );
+          syncState.pendingActions = syncState.pendingActions.filter((a) => a.examId !== action.examId);
         } else {
           result.errors.push(`Failed to sync exam: ${action.examId}`);
         }
       } else if (action.type === "delete") {
         const success = await deleteRemoteExam(action.examId);
         if (success) {
-          syncState.pendingActions = syncState.pendingActions.filter(
-            (a) => a.examId !== action.examId,
-          );
+          syncState.pendingActions = syncState.pendingActions.filter((a) => a.examId !== action.examId);
         } else {
           result.errors.push(`Failed to delete exam: ${action.examId}`);
         }
@@ -564,10 +552,7 @@ export const deleteExamsWithSync = async (ids: string[]): Promise<void> => {
 /**
  * Update questions with sync
  */
-export const updateQuestionsWithSync = async (
-  fileName: string,
-  questions: ExamRecord["questions"],
-): Promise<void> => {
+export const updateQuestionsWithSync = async (fileName: string, questions: ExamRecord["questions"]): Promise<void> => {
   // Update locally
   await storageService.updateQuestionsForFile(fileName, questions);
 
@@ -598,8 +583,11 @@ export const reSaveExamResultWithSync = async (
   rawPages: ExamRecord["rawPages"],
   questions?: ExamRecord["questions"],
 ): Promise<void> => {
+  console.log("[Sync] reSaveExamResultWithSync called for:", fileName);
+
   // Update locally first
   await storageService.reSaveExamResult(fileName, rawPages, questions);
+  console.log("[Sync] Local save completed for:", fileName);
 
   // Get updated record for sync
   const list = await storageService.getHistoryList();
@@ -608,7 +596,9 @@ export const reSaveExamResultWithSync = async (
   if (meta) {
     const exam = await storageService.loadExamResult(meta.id);
     if (exam && syncState.isOnline) {
-      await saveRemoteExam(exam).catch(() => {
+      console.log("[Sync] Online - attempting remote save for:", fileName);
+      await saveRemoteExam(exam).catch((error) => {
+        console.error("[Sync] Remote save failed:", error);
         addPendingAction({
           type: "save",
           examId: meta.id,
@@ -616,7 +606,9 @@ export const reSaveExamResultWithSync = async (
           data: exam,
         });
       });
+      console.log("[Sync] Remote save attempt completed for:", fileName);
     } else if (exam) {
+      console.log("[Sync] Offline - adding to pending queue:", fileName);
       // Offline - add to pending queue
       addPendingAction({
         type: "save",
@@ -625,6 +617,8 @@ export const reSaveExamResultWithSync = async (
         data: exam,
       });
     }
+  } else {
+    console.warn("[Sync] No metadata found for:", fileName);
   }
 };
 
@@ -637,13 +631,11 @@ export const updatePageDetectionsAndQuestionsWithSync = async (
   newDetections: any[],
   newFileQuestions: ExamRecord["questions"],
 ): Promise<void> => {
+  console.log("[Sync] updatePageDetectionsAndQuestionsWithSync called for:", fileName, "page:", pageNumber);
+
   // Update locally first
-  await storageService.updatePageDetectionsAndQuestions(
-    fileName,
-    pageNumber,
-    newDetections,
-    newFileQuestions,
-  );
+  await storageService.updatePageDetectionsAndQuestions(fileName, pageNumber, newDetections, newFileQuestions);
+  console.log("[Sync] Local detection update completed for:", fileName);
 
   // Get updated record for sync
   const list = await storageService.getHistoryList();
@@ -651,8 +643,11 @@ export const updatePageDetectionsAndQuestionsWithSync = async (
 
   if (meta) {
     const exam = await storageService.loadExamResult(meta.id);
+    console.log("[Sync] isOnline:", syncState.isOnline, "exam loaded:", !!exam);
     if (exam && syncState.isOnline) {
-      await saveRemoteExam(exam).catch(() => {
+      console.log("[Sync] Online - attempting remote save for detection update:", fileName);
+      await saveRemoteExam(exam).catch((error) => {
+        console.error("[Sync] Remote save failed:", error);
         addPendingAction({
           type: "save",
           examId: meta.id,
@@ -660,7 +655,9 @@ export const updatePageDetectionsAndQuestionsWithSync = async (
           data: exam,
         });
       });
+      console.log("[Sync] Remote save attempt completed for:", fileName);
     } else if (exam) {
+      console.log("[Sync] Offline - adding to pending queue:", fileName);
       // Offline - add to pending queue
       addPendingAction({
         type: "save",
@@ -669,6 +666,8 @@ export const updatePageDetectionsAndQuestionsWithSync = async (
         data: exam,
       });
     }
+  } else {
+    console.warn("[Sync] No metadata found for:", fileName);
   }
 };
 
