@@ -1,10 +1,9 @@
-
 import { Type } from "@google/genai";
-import { analysisPrompt } from './analysis-prompt.js';
+import { analysisPrompt } from "./analysis-prompt.js";
 
 export const MODEL_IDS = {
-  FLASH: 'gemini-3-flash-preview',
-  PRO: 'gemini-3-pro-preview'
+  FLASH: "gemini-3-flash-preview",
+  PRO: "gemini-3-pro-preview",
 };
 
 export const PROMPTS = {
@@ -47,7 +46,7 @@ export const PROMPTS = {
   }
 ]
 `,
-  ANALYSIS: analysisPrompt
+  ANALYSIS: analysisPrompt,
 };
 
 export const SCHEMAS = {
@@ -56,17 +55,18 @@ export const SCHEMAS = {
     properties: {
       id: {
         type: Type.STRING,
-        description: "题号字符串，如 '1' 或 '13'。如果是跨栏或跨页内容则设为 'continuation'。"
+        description:
+          "题号字符串，如 '1' 或 '13'。如果是跨栏或跨页内容则设为 'continuation'。",
       },
       boxes_2d: {
         type: Type.ARRAY,
         items: {
           type: Type.NUMBER,
         },
-        description: "该题目的边界框列表 [ymin, xmin, ymax, xmax] (0-1000)。"
-      }
+        description: "该题目的边界框列表 [ymin, xmin, ymax, xmax] (0-1000)。",
+      },
     },
-    required: ["id", "boxes_2d"]
+    required: ["id", "boxes_2d"],
   },
   ANALYSIS: {
     type: Type.OBJECT,
@@ -78,20 +78,59 @@ export const SCHEMAS = {
         items: {
           type: Type.OBJECT,
           properties: {
-             level0: { type: Type.STRING, description: "必填，例如: '第十一章 立体几何初步'" },
-             level1: { type: Type.STRING, description: "必填，例如: '11.1 空间几何体'" },
-             level2: { type: Type.STRING, description: "可空，例如: '11.1.1 空间几何体与斜二测画法'" },
-             level3: { type: Type.STRING, description: "可空，例如：1. 空间几何体" }
+            level0: {
+              type: Type.STRING,
+              description: "必填，例如: '第十一章 立体几何初步'",
+            },
+            level1: {
+              type: Type.STRING,
+              description: "必填，例如: '11.1 空间几何体'",
+            },
+            level2: {
+              type: Type.STRING,
+              description: "可空，例如: '11.1.1 空间几何体与斜二测画法'",
+            },
+            level3: {
+              type: Type.STRING,
+              description: "可空，例如：1. 空间几何体",
+            },
           },
-          required: ["level0", "level1"]
-        }
+          required: ["level0", "level1"],
+        },
       },
-      question_md: { type: Type.STRING, description: "题目文本，必须使用Markdown格式。数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      solution_md: { type: Type.STRING, description: "题目答案。1. 选择题给出ABCD字母本身即可，解析写在analysis_md。2.填空题给出答案即可，解析写在analysis_md。3.解答题必须给出完整的、分步的、包含评分标准的解答过程（写出'解：'）。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      analysis_md: { type: Type.STRING, description: "解题思路分析。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      breakthrough_md: { type: Type.STRING, description: "突破口（选填）。此字段主要针对难题，简单题目可以不写。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" },
-      pitfalls_md: { type: Type.STRING, description: "易错点（选填）。此字段主要针对易错题，不易错的题目可以不写。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。" }
+      question_md: {
+        type: Type.STRING,
+        description:
+          "题目文本，必须使用Markdown格式。数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。",
+      },
+      solution_md: {
+        type: Type.STRING,
+        description:
+          "题目答案。1. 选择题给出ABCD字母本身即可，解析写在analysis_md。2.填空题给出答案即可，解析写在analysis_md。3.解答题必须给出完整的、分步的、包含评分标准的解答过程（写出'解：'）。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。",
+      },
+      analysis_md: {
+        type: Type.STRING,
+        description:
+          "解题思路分析。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。",
+      },
+      breakthrough_md: {
+        type: Type.STRING,
+        description:
+          "突破口（选填）。此字段主要针对难题，简单题目可以不写。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。",
+      },
+      pitfalls_md: {
+        type: Type.STRING,
+        description:
+          "易错点（选填）。此字段主要针对易错题，不易错的题目可以不写。所有数学公式必须使用LaTeX格式并用 $ 或 $$ 包裹。",
+      },
     },
-    required: ["difficulty", "question_type", "tags", "question_md", "solution_md", "analysis_md"]
-  }
+    required: [
+      "difficulty",
+      "question_type",
+      "tags",
+      "question_md",
+      "solution_md",
+      "analysis_md",
+    ],
+  },
 };

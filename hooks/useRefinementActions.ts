@@ -2,7 +2,10 @@ import { CropSettings } from "../services/pdfService";
 import { DetectedQuestion, DebugPageData } from "../types";
 import { generateQuestionsFromRawPages } from "../services/generationService";
 import { detectQuestionsOnPage } from "../services/geminiService";
-import { reSaveExamResultWithSync, updatePageDetectionsAndQuestionsWithSync } from "../services/syncService";
+import {
+  reSaveExamResultWithSync,
+  updatePageDetectionsAndQuestionsWithSync,
+} from "../services/syncService";
 
 interface RefinementProps {
   state: any;
@@ -11,14 +14,30 @@ interface RefinementProps {
   refreshHistoryList: () => Promise<void>;
 }
 
-export const useRefinementActions = ({ state, setters, actions, refreshHistoryList }: RefinementProps) => {
-  const { rawPages, concurrency, selectedModel, cropSettings, batchSize, apiKey, questions } = state;
-  const { setQuestions, setRawPages, setProcessingFiles, setCroppingDone } = setters;
+export const useRefinementActions = ({
+  state,
+  setters,
+  actions,
+  refreshHistoryList,
+}: RefinementProps) => {
+  const {
+    rawPages,
+    concurrency,
+    selectedModel,
+    cropSettings,
+    batchSize,
+    apiKey,
+    questions,
+  } = state;
+  const { setQuestions, setRawPages, setProcessingFiles, setCroppingDone } =
+    setters;
   const { addNotification } = actions;
 
   // Helper to preserve analysis data across regenerations
   const mergeExistingAnalysis = (newQuestions: any[], fileName: string) => {
-    const existingFileQuestions = questions.filter((q: any) => q.fileName === fileName);
+    const existingFileQuestions = questions.filter(
+      (q: any) => q.fileName === fileName,
+    );
     const analysisMap = new Map();
     existingFileQuestions.forEach((q: any) => {
       if (q.analysis) analysisMap.set(q.id, q.analysis);
@@ -32,7 +51,10 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
     return newQuestions;
   };
 
-  const handleRecropFile = async (fileName: string, specificSettings: CropSettings) => {
+  const handleRecropFile = async (
+    fileName: string,
+    specificSettings: CropSettings,
+  ) => {
     const startTimeLocal = Date.now();
     const targetPages = rawPages.filter((p: any) => p.fileName === fileName);
     if (targetPages.length === 0) return;
@@ -60,8 +82,10 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
           const others = prev.filter((q: any) => q.fileName !== fileName);
           const combined = [...others, ...newQuestions];
           return combined.sort((a: any, b: any) => {
-            if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
-            if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+            if (a.fileName !== b.fileName)
+              return a.fileName.localeCompare(b.fileName);
+            if (a.pageNumber !== b.pageNumber)
+              return a.pageNumber - b.pageNumber;
             return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
           });
         });
@@ -69,11 +93,19 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
         await reSaveExamResultWithSync(fileName, targetPages, newQuestions);
         await refreshHistoryList();
         const duration = ((Date.now() - startTimeLocal) / 1000).toFixed(1);
-        addNotification(fileName, "success", `Refined ${fileName} in ${duration}s`);
+        addNotification(
+          fileName,
+          "success",
+          `Refined ${fileName} in ${duration}s`,
+        );
       }
     } catch (e: any) {
       console.error(e);
-      addNotification(fileName, "error", `Failed to refine ${fileName}: ${e.message}`);
+      addNotification(
+        fileName,
+        "error",
+        `Failed to refine ${fileName}: ${e.message}`,
+      );
     } finally {
       setProcessingFiles((prev: any) => {
         const next = new Set(prev);
@@ -110,7 +142,12 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
 
         await Promise.all(
           chunk.map(async (page: DebugPageData) => {
-            const detections = await detectQuestionsOnPage(page.dataUrl, selectedModel, undefined, apiKey);
+            const detections = await detectQuestionsOnPage(
+              page.dataUrl,
+              selectedModel,
+              undefined,
+              apiKey,
+            );
             const newPage = { ...page, detections };
             newResults.push(newPage);
           }),
@@ -120,13 +157,17 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
       if (signal.aborted) return;
 
       const mergedRawPages = updatedRawPages.map((p) => {
-        const match = newResults.find((n) => n.fileName === p.fileName && n.pageNumber === p.pageNumber);
+        const match = newResults.find(
+          (n) => n.fileName === p.fileName && n.pageNumber === p.pageNumber,
+        );
         return match ? match : p;
       });
 
       setRawPages(mergedRawPages);
 
-      const finalFilePages = mergedRawPages.filter((p) => p.fileName === fileName);
+      const finalFilePages = mergedRawPages.filter(
+        (p) => p.fileName === fileName,
+      );
 
       let newQuestions = await generateQuestionsFromRawPages(
         finalFilePages,
@@ -145,8 +186,10 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
           const others = prev.filter((q: any) => q.fileName !== fileName);
           const combined = [...others, ...newQuestions];
           return combined.sort((a: any, b: any) => {
-            if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
-            if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+            if (a.fileName !== b.fileName)
+              return a.fileName.localeCompare(b.fileName);
+            if (a.pageNumber !== b.pageNumber)
+              return a.pageNumber - b.pageNumber;
             return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
           });
         });
@@ -154,11 +197,19 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
         await reSaveExamResultWithSync(fileName, finalFilePages, newQuestions);
         await refreshHistoryList();
         const duration = ((Date.now() - startTimeLocal) / 1000).toFixed(1);
-        addNotification(fileName, "success", `Re-scan complete for ${fileName} in ${duration}s`);
+        addNotification(
+          fileName,
+          "success",
+          `Re-scan complete for ${fileName} in ${duration}s`,
+        );
       }
     } catch (error: any) {
       console.error(error);
-      addNotification(fileName, "error", `Re-analysis failed for ${fileName}: ${error.message}`);
+      addNotification(
+        fileName,
+        "error",
+        `Re-analysis failed for ${fileName}: ${error.message}`,
+      );
     } finally {
       setProcessingFiles((prev: any) => {
         const next = new Set(prev);
@@ -168,7 +219,11 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
     }
   };
 
-  const handleUpdateDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => {
+  const handleUpdateDetections = async (
+    fileName: string,
+    pageNumber: number,
+    newDetections: DetectedQuestion[],
+  ) => {
     const startTimeLocal = Date.now();
     const updatedPages = rawPages.map((p: any) => {
       if (p.fileName === fileName && p.pageNumber === pageNumber) {
@@ -181,7 +236,9 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
     setProcessingFiles((prev: any) => new Set(prev).add(fileName));
 
     try {
-      const targetPages = updatedPages.filter((p: any) => p.fileName === fileName);
+      const targetPages = updatedPages.filter(
+        (p: any) => p.fileName === fileName,
+      );
       if (targetPages.length === 0) {
         setProcessingFiles((prev: any) => {
           const n = new Set(prev);
@@ -206,14 +263,21 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
       if (!taskController.signal.aborted) {
         newQuestions = mergeExistingAnalysis(newQuestions, fileName);
 
-        await updatePageDetectionsAndQuestionsWithSync(fileName, pageNumber, newDetections, newQuestions);
+        await updatePageDetectionsAndQuestionsWithSync(
+          fileName,
+          pageNumber,
+          newDetections,
+          newQuestions,
+        );
 
         setQuestions((prev: any) => {
           const others = prev.filter((q: any) => q.fileName !== fileName);
           const combined = [...others, ...newQuestions];
           return combined.sort((a: any, b: any) => {
-            if (a.fileName !== b.fileName) return a.fileName.localeCompare(b.fileName);
-            if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+            if (a.fileName !== b.fileName)
+              return a.fileName.localeCompare(b.fileName);
+            if (a.pageNumber !== b.pageNumber)
+              return a.pageNumber - b.pageNumber;
             return (parseFloat(a.id) || 0) - (parseFloat(b.id) || 0);
           });
         });
@@ -223,7 +287,11 @@ export const useRefinementActions = ({ state, setters, actions, refreshHistoryLi
       }
     } catch (err: any) {
       console.error("Failed to save or recrop", err);
-      addNotification(fileName, "error", `Failed to save changes: ${err.message}`);
+      addNotification(
+        fileName,
+        "error",
+        `Failed to save changes: ${err.message}`,
+      );
     } finally {
       setProcessingFiles((prev: any) => {
         const next = new Set(prev);

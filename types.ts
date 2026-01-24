@@ -8,7 +8,9 @@ export interface BoundingBox {
 export interface DetectedQuestion {
   id: string;
   // Support both single box [y,x,y,x] and multiple boxes [[y,x,y,x], [y,x,y,x]]
-  boxes_2d: [number, number, number, number] | [number, number, number, number][];
+  boxes_2d:
+    | [number, number, number, number]
+    | [number, number, number, number][];
 }
 
 export interface QuestionAnalysis {

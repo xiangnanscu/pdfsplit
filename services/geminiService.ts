@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { DetectedQuestion, QuestionAnalysis } from "../types";
 import { PROMPTS, SCHEMAS, MODEL_IDS } from "../shared/ai-config.js";
@@ -9,20 +8,20 @@ const getAiClient = (apiKey?: string) => {
   return new GoogleGenAI({ apiKey: key });
 };
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Detects questions on a single image with automatic retry logic.
  */
 export const detectQuestionsOnPage = async (
-  image: string, 
+  image: string,
   modelId: string = MODEL_IDS.PRO,
   maxRetries: number = 5,
-  apiKey?: string
+  apiKey?: string,
 ): Promise<DetectedQuestion[]> => {
   let attempt = 0;
   const ai = getAiClient(apiKey);
-  
+
   while (attempt < maxRetries) {
     try {
       const promptText = PROMPTS.BASIC;
@@ -35,41 +34,47 @@ export const detectQuestionsOnPage = async (
             parts: [
               {
                 inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: image.split(',')[1]
-                }
+                  mimeType: "image/jpeg",
+                  data: image.split(",")[1],
+                },
               },
-              { text: promptText }
-            ]
-          }
+              { text: promptText },
+            ],
+          },
         ],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
-            items: itemsSchema
-          }
-        }
+            items: itemsSchema,
+          },
+        },
       });
 
       const text = response.text;
       if (!text) throw new Error("Empty response from AI");
-      
+
       const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) throw new Error("Invalid response format: Expected Array");
-      
+      if (!Array.isArray(parsed))
+        throw new Error("Invalid response format: Expected Array");
+
       return parsed as DetectedQuestion[];
     } catch (error: any) {
       attempt++;
-      const isRateLimit = error?.message?.includes('429') || error?.status === 429;
+      const isRateLimit =
+        error?.message?.includes("429") || error?.status === 429;
       const waitTime = isRateLimit ? Math.pow(2, attempt) * 1000 : 2000;
-      
-      console.warn(`Gemini detection attempt ${attempt} failed: ${error.message}. Retrying in ${waitTime}ms...`);
-      
+
+      console.warn(
+        `Gemini detection attempt ${attempt} failed: ${error.message}. Retrying in ${waitTime}ms...`,
+      );
+
       if (attempt >= maxRetries) {
-        throw new Error(`AI 识别在 ${maxRetries} 次重试后仍然失败: ${error.message}`);
+        throw new Error(
+          `AI 识别在 ${maxRetries} 次重试后仍然失败: ${error.message}`,
+        );
       }
-      
+
       await delay(waitTime);
     }
   }
@@ -83,11 +88,11 @@ export const analyzeQuestion = async (
   image: string,
   modelId: string = MODEL_IDS.FLASH,
   maxRetries: number = 3,
-  apiKey?: string
+  apiKey?: string,
 ): Promise<QuestionAnalysis> => {
   let attempt = 0;
   const ai = getAiClient(apiKey);
-  
+
   while (attempt < maxRetries) {
     try {
       const promptText = PROMPTS.ANALYSIS;
@@ -98,32 +103,34 @@ export const analyzeQuestion = async (
             parts: [
               {
                 inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: image.split(',')[1]
-                }
+                  mimeType: "image/jpeg",
+                  data: image.split(",")[1],
+                },
               },
-              { text: promptText }
-            ]
-          }
+              { text: promptText },
+            ],
+          },
         ],
         config: {
           responseMimeType: "application/json",
-          responseSchema: SCHEMAS.ANALYSIS
-        }
+          responseSchema: SCHEMAS.ANALYSIS,
+        },
       });
 
       const text = response.text;
       if (!text) throw new Error("Empty response from AI Analysis");
-      
-      return JSON.parse(text) as QuestionAnalysis;
 
+      return JSON.parse(text) as QuestionAnalysis;
     } catch (error: any) {
       attempt++;
-      const isRateLimit = error?.message?.includes('429') || error?.status === 429;
+      const isRateLimit =
+        error?.message?.includes("429") || error?.status === 429;
       const waitTime = isRateLimit ? Math.pow(2, attempt) * 1000 : 2000;
-      
-      console.warn(`Gemini analysis attempt ${attempt} failed: ${error.message}. Retrying...`);
-      
+
+      console.warn(
+        `Gemini analysis attempt ${attempt} failed: ${error.message}. Retrying...`,
+      );
+
       if (attempt >= maxRetries) {
         throw error;
       }

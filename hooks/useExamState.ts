@@ -1,31 +1,36 @@
-
-import { useState, useRef, useEffect } from 'react';
-import { ProcessingStatus, QuestionImage, DebugPageData, HistoryMetadata, SourcePage } from '../types';
-import { CropSettings } from '../services/pdfService';
-import { AppNotification } from '../components/NotificationToast';
+import { useState, useRef, useEffect } from "react";
+import {
+  ProcessingStatus,
+  QuestionImage,
+  DebugPageData,
+  HistoryMetadata,
+  SourcePage,
+} from "../types";
+import { CropSettings } from "../services/pdfService";
+import { AppNotification } from "../components/NotificationToast";
 
 export const DEFAULT_SETTINGS: CropSettings = {
   cropPadding: 25,
   canvasPadding: 10,
-  mergeOverlap: -5
+  mergeOverlap: -5,
 };
 
 export const STORAGE_KEYS = {
-  CROP_SETTINGS: 'exam_splitter_crop_settings_v3',
-  CONCURRENCY: 'exam_splitter_concurrency_v3',
-  ANALYSIS_CONCURRENCY: 'exam_splitter_analysis_concurrency_v1',
-  MODEL: 'exam_splitter_selected_model_v3',
-  USE_HISTORY_CACHE: 'exam_splitter_use_history_cache_v1',
-  BATCH_SIZE: 'exam_splitter_batch_size_v1',
-  API_KEY: 'exam_splitter_api_key_v1'
+  CROP_SETTINGS: "exam_splitter_crop_settings_v3",
+  CONCURRENCY: "exam_splitter_concurrency_v3",
+  ANALYSIS_CONCURRENCY: "exam_splitter_analysis_concurrency_v1",
+  MODEL: "exam_splitter_selected_model_v3",
+  USE_HISTORY_CACHE: "exam_splitter_use_history_cache_v1",
+  BATCH_SIZE: "exam_splitter_batch_size_v1",
+  API_KEY: "exam_splitter_api_key_v1",
 };
 
 // Helper for auto-detect batch size based on RAM and CPU
 export const getAutoBatchSize = (): number => {
-  if (typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator) {
+  if (typeof navigator !== "undefined" && "hardwareConcurrency" in navigator) {
     return navigator.hardwareConcurrency || 4;
   }
-  return 4; 
+  return 4;
 };
 
 export const useExamState = () => {
@@ -33,18 +38,22 @@ export const useExamState = () => {
   const [questions, setQuestions] = useState<QuestionImage[]>([]);
   const [rawPages, setRawPages] = useState<DebugPageData[]>([]);
   const [sourcePages, setSourcePages] = useState<SourcePage[]>([]);
-  
+
   // Specific file interactions
   const [debugFile, setDebugFile] = useState<string | null>(null);
   const [lastViewedFile, setLastViewedFile] = useState<string | null>(null);
   const [refiningFile, setRefiningFile] = useState<string | null>(null);
 
   // Legacy sync
-  const [legacySyncFiles, setLegacySyncFiles] = useState<Set<string>>(new Set());
+  const [legacySyncFiles, setLegacySyncFiles] = useState<Set<string>>(
+    new Set(),
+  );
   const [isSyncingLegacy, setIsSyncingLegacy] = useState(false);
 
   // Background Processing
-  const [processingFiles, setProcessingFiles] = useState<Set<string>>(new Set());
+  const [processingFiles, setProcessingFiles] = useState<Set<string>>(
+    new Set(),
+  );
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   // History
@@ -58,8 +67,11 @@ export const useExamState = () => {
       const saved = localStorage.getItem(STORAGE_KEYS.CROP_SETTINGS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.canvasPadding === undefined && parsed.canvasPaddingLeft !== undefined) {
-             parsed.canvasPadding = parsed.canvasPaddingLeft;
+        if (
+          parsed.canvasPadding === undefined &&
+          parsed.canvasPaddingLeft !== undefined
+        ) {
+          parsed.canvasPadding = parsed.canvasPaddingLeft;
         }
         return { ...DEFAULT_SETTINGS, ...parsed };
       }
@@ -68,7 +80,7 @@ export const useExamState = () => {
       return DEFAULT_SETTINGS;
     }
   });
-  
+
   const [concurrency, setConcurrency] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CONCURRENCY);
@@ -77,7 +89,7 @@ export const useExamState = () => {
       return 5;
     }
   });
-  
+
   const [analysisConcurrency, setAnalysisConcurrency] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_CONCURRENCY);
@@ -97,34 +109,34 @@ export const useExamState = () => {
   });
 
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.MODEL) || 'gemini-3-flash-preview';
+    return localStorage.getItem(STORAGE_KEYS.MODEL) || "gemini-3-flash-preview";
   });
 
   const [useHistoryCache, setUseHistoryCache] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.USE_HISTORY_CACHE) === 'true';
+    return localStorage.getItem(STORAGE_KEYS.USE_HISTORY_CACHE) === "true";
   });
 
   const [apiKey, setApiKey] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
+    return localStorage.getItem(STORAGE_KEYS.API_KEY) || "";
   });
 
   // Progress
-  const [progress, setProgress] = useState(0); 
+  const [progress, setProgress] = useState(0);
   const [total, setTotal] = useState(0);
-  const [completedCount, setCompletedCount] = useState(0); 
+  const [completedCount, setCompletedCount] = useState(0);
   const [error, setError] = useState<string | undefined>();
-  const [detailedStatus, setDetailedStatus] = useState<string>('');
+  const [detailedStatus, setDetailedStatus] = useState<string>("");
   const [croppingTotal, setCroppingTotal] = useState(0);
   const [croppingDone, setCroppingDone] = useState(0);
-  
+
   // Analysis Progress
   const [analyzingTotal, setAnalyzingTotal] = useState(0);
   const [analyzingDone, setAnalyzingDone] = useState(0);
-  
+
   // Retry / Round
   const [currentRound, setCurrentRound] = useState(1);
   const [failedCount, setFailedCount] = useState(0);
-  
+
   // Timers
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState("00:00");
@@ -134,15 +146,21 @@ export const useExamState = () => {
 
   // Persistence Effects
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.CROP_SETTINGS, JSON.stringify(cropSettings));
+    localStorage.setItem(
+      STORAGE_KEYS.CROP_SETTINGS,
+      JSON.stringify(cropSettings),
+    );
   }, [cropSettings]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CONCURRENCY, concurrency.toString());
   }, [concurrency]);
-  
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ANALYSIS_CONCURRENCY, analysisConcurrency.toString());
+    localStorage.setItem(
+      STORAGE_KEYS.ANALYSIS_CONCURRENCY,
+      analysisConcurrency.toString(),
+    );
   }, [analysisConcurrency]);
 
   useEffect(() => {
@@ -154,16 +172,23 @@ export const useExamState = () => {
   }, [selectedModel]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USE_HISTORY_CACHE, String(useHistoryCache));
+    localStorage.setItem(
+      STORAGE_KEYS.USE_HISTORY_CACHE,
+      String(useHistoryCache),
+    );
   }, [useHistoryCache]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.API_KEY, apiKey);
   }, [apiKey]);
 
-  const addNotification = (fileName: string | null, type: 'success' | 'error', message: string) => {
-      const id = Date.now().toString() + Math.random().toString();
-      setNotifications(prev => [...prev, { id, fileName, type, message }]);
+  const addNotification = (
+    fileName: string | null,
+    type: "success" | "error",
+    message: string,
+  ) => {
+    const id = Date.now().toString() + Math.random().toString();
+    setNotifications((prev) => [...prev, { id, fileName, type, message }]);
   };
 
   const resetState = () => {
@@ -181,7 +206,7 @@ export const useExamState = () => {
     setAnalyzingTotal(0);
     setAnalyzingDone(0);
     setError(undefined);
-    setDetailedStatus('');
+    setDetailedStatus("");
     setDebugFile(null);
     setLastViewedFile(null);
     setRefiningFile(null);
@@ -193,40 +218,99 @@ export const useExamState = () => {
     setNotifications([]);
     setLegacySyncFiles(new Set());
     setIsSyncingLegacy(false);
-    if (window.location.search) window.history.pushState({}, '', window.location.pathname);
+    if (window.location.search)
+      window.history.pushState({}, "", window.location.pathname);
   };
 
   const handleStop = () => {
     stopRequestedRef.current = true;
     if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+      abortControllerRef.current.abort();
     }
     setDetailedStatus("Stopping... Current requests will finish.");
   };
 
   return {
     state: {
-      status, questions, rawPages, sourcePages, debugFile, lastViewedFile, refiningFile,
-      legacySyncFiles, isSyncingLegacy, processingFiles, notifications, showHistory,
-      historyList, isLoadingHistory, cropSettings, concurrency, analysisConcurrency, batchSize, selectedModel,
-      useHistoryCache, apiKey, progress, total, completedCount, error, detailedStatus,
-      croppingTotal, croppingDone, analyzingTotal, analyzingDone, currentRound, failedCount, startTime, elapsedTime
+      status,
+      questions,
+      rawPages,
+      sourcePages,
+      debugFile,
+      lastViewedFile,
+      refiningFile,
+      legacySyncFiles,
+      isSyncingLegacy,
+      processingFiles,
+      notifications,
+      showHistory,
+      historyList,
+      isLoadingHistory,
+      cropSettings,
+      concurrency,
+      analysisConcurrency,
+      batchSize,
+      selectedModel,
+      useHistoryCache,
+      apiKey,
+      progress,
+      total,
+      completedCount,
+      error,
+      detailedStatus,
+      croppingTotal,
+      croppingDone,
+      analyzingTotal,
+      analyzingDone,
+      currentRound,
+      failedCount,
+      startTime,
+      elapsedTime,
     },
     setters: {
-      setStatus, setQuestions, setRawPages, setSourcePages, setDebugFile, setLastViewedFile, setRefiningFile,
-      setLegacySyncFiles, setIsSyncingLegacy, setProcessingFiles, setNotifications, setShowHistory,
-      setHistoryList, setIsLoadingHistory, setCropSettings, setConcurrency, setAnalysisConcurrency, setBatchSize, setSelectedModel,
-      setUseHistoryCache, setApiKey, setProgress, setTotal, setCompletedCount, setError, setDetailedStatus,
-      setCroppingTotal, setCroppingDone, setAnalyzingTotal, setAnalyzingDone, setCurrentRound, setFailedCount, setStartTime, setElapsedTime
+      setStatus,
+      setQuestions,
+      setRawPages,
+      setSourcePages,
+      setDebugFile,
+      setLastViewedFile,
+      setRefiningFile,
+      setLegacySyncFiles,
+      setIsSyncingLegacy,
+      setProcessingFiles,
+      setNotifications,
+      setShowHistory,
+      setHistoryList,
+      setIsLoadingHistory,
+      setCropSettings,
+      setConcurrency,
+      setAnalysisConcurrency,
+      setBatchSize,
+      setSelectedModel,
+      setUseHistoryCache,
+      setApiKey,
+      setProgress,
+      setTotal,
+      setCompletedCount,
+      setError,
+      setDetailedStatus,
+      setCroppingTotal,
+      setCroppingDone,
+      setAnalyzingTotal,
+      setAnalyzingDone,
+      setCurrentRound,
+      setFailedCount,
+      setStartTime,
+      setElapsedTime,
     },
     refs: {
       abortControllerRef,
-      stopRequestedRef
+      stopRequestedRef,
     },
     actions: {
       addNotification,
       resetState,
-      handleStop
-    }
+      handleStop,
+    },
   };
 };

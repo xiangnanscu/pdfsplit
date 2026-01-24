@@ -1,4 +1,10 @@
-import { DebugPageData, HistoryMetadata, DetectedQuestion, QuestionImage, ExamRecord } from "../types";
+import {
+  DebugPageData,
+  HistoryMetadata,
+  DetectedQuestion,
+  QuestionImage,
+  ExamRecord,
+} from "../types";
 
 const DB_NAME = "MathSplitterDB";
 const STORE_NAME = "exams";
@@ -39,8 +45,10 @@ const openDB = (): Promise<IDBDatabase> => {
           }
         };
 
-        upgradeRequest.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result);
-        upgradeRequest.onerror = (e) => reject((e.target as IDBOpenDBRequest).error);
+        upgradeRequest.onsuccess = (e) =>
+          resolve((e.target as IDBOpenDBRequest).result);
+        upgradeRequest.onerror = (e) =>
+          reject((e.target as IDBOpenDBRequest).error);
         return;
       }
 
@@ -71,7 +79,9 @@ export const saveExamResult = async (
   const timestamp = Date.now();
 
   // Safety: Deduplicate pages by pageNumber before saving to prevent DB corruption
-  const uniquePages = Array.from(new Map(rawPages.map((item) => [item.pageNumber, item])).values());
+  const uniquePages = Array.from(
+    new Map(rawPages.map((item) => [item.pageNumber, item])).values(),
+  );
   uniquePages.sort((a, b) => a.pageNumber - b.pageNumber);
 
   const record: ExamRecord = {
@@ -120,7 +130,9 @@ export const reSaveExamResult = async (
       const record = getReq.result as ExamRecord;
       if (record) {
         // Dedup pages
-        const uniquePages = Array.from(new Map(rawPages.map((item) => [item.pageNumber, item])).values());
+        const uniquePages = Array.from(
+          new Map(rawPages.map((item) => [item.pageNumber, item])).values(),
+        );
         uniquePages.sort((a, b) => a.pageNumber - b.pageNumber);
 
         record.rawPages = uniquePages;
@@ -179,7 +191,9 @@ export const updatePageDetectionsAndQuestions = async (
       }
 
       // 1. Update the specific page detections
-      const pageIndex = record.rawPages.findIndex((p: DebugPageData) => p.pageNumber === pageNumber);
+      const pageIndex = record.rawPages.findIndex(
+        (p: DebugPageData) => p.pageNumber === pageNumber,
+      );
       if (pageIndex !== -1) {
         record.rawPages[pageIndex].detections = newDetections;
       }
@@ -200,7 +214,10 @@ export const updatePageDetectionsAndQuestions = async (
  * Efficiently update ONLY the questions list for a specific file name.
  * Used for real-time analysis saving.
  */
-export const updateQuestionsForFile = async (fileName: string, questions: QuestionImage[]): Promise<void> => {
+export const updateQuestionsForFile = async (
+  fileName: string,
+  questions: QuestionImage[],
+): Promise<void> => {
   const list = await getHistoryList();
   const targetItem = list.find((h) => h.name === fileName);
 
@@ -231,15 +248,27 @@ export const updateQuestionsForFile = async (fileName: string, questions: Questi
 };
 
 // Legacy support alias
-export const updatePageDetections = async (fileName: string, pageNumber: number, newDetections: DetectedQuestion[]) => {
-  return updatePageDetectionsAndQuestions(fileName, pageNumber, newDetections, []);
+export const updatePageDetections = async (
+  fileName: string,
+  pageNumber: number,
+  newDetections: DetectedQuestion[],
+) => {
+  return updatePageDetectionsAndQuestions(
+    fileName,
+    pageNumber,
+    newDetections,
+    [],
+  );
 };
 
 /**
  * Update ONLY questions for a specific exam ID.
  * Used for the "Sync Legacy" feature.
  */
-export const updateExamQuestionsOnly = async (id: string, questions: QuestionImage[]): Promise<void> => {
+export const updateExamQuestionsOnly = async (
+  id: string,
+  questions: QuestionImage[],
+): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], "readwrite");
@@ -292,7 +321,9 @@ export const getHistoryList = async (): Promise<HistoryMetadata[]> => {
 /**
  * Load full data for a specific history item
  */
-export const loadExamResult = async (id: string): Promise<ExamRecord | null> => {
+export const loadExamResult = async (
+  id: string,
+): Promise<ExamRecord | null> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], "readonly");

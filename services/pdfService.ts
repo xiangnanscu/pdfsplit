@@ -1,7 +1,7 @@
+import * as pdfjsLib from "pdfjs-dist";
 
-import * as pdfjsLib from 'pdfjs-dist';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
 
 export interface CropSettings {
   cropPadding: number; // Raw crop buffer (unified for X and Y)
@@ -17,25 +17,28 @@ export interface TrimBounds {
   h: number;
 }
 
-export const renderPageToImage = async (page: any, scale: number = 3): Promise<{ dataUrl: string, width: number, height: number }> => {
+export const renderPageToImage = async (
+  page: any,
+  scale: number = 3,
+): Promise<{ dataUrl: string; width: number; height: number }> => {
   const viewport = page.getViewport({ scale });
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
   if (!context) throw new Error("Canvas context failed");
-  
+
   canvas.height = viewport.height;
   canvas.width = viewport.width;
 
   await page.render({
     canvasContext: context,
-    viewport: viewport
+    viewport: viewport,
   }).promise;
 
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
   const w = canvas.width;
   const h = canvas.height;
-  
+
   // Cleanup
   canvas.width = 0;
   canvas.height = 0;

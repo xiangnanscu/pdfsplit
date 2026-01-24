@@ -1,5 +1,3 @@
-
-
 // This file contains the worker code as a string to avoid bundler configuration issues in the browser environment.
 // It replicates the logic from canvas-utils.js and pdfService.ts adapted for a Worker environment (OffscreenCanvas).
 
@@ -589,6 +587,6 @@ self.onmessage = async (e) => {
       }
   }
 };
-`
-const blob = new Blob([WORKER_CODE], { type: 'application/javascript' });
+`;
+const blob = new Blob([WORKER_CODE], { type: "application/javascript" });
 export const WORKER_BLOB_URL = URL.createObjectURL(blob);

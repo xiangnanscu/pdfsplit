@@ -9,7 +9,8 @@ import * as storageService from "./storageService";
 // Get API URL from environment or use default
 const getApiUrl = (): string => {
   // @ts-ignore - Vite injects import.meta.env
-  const envUrl = typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL;
+  const envUrl =
+    typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL;
   return envUrl || "/api";
 };
 
@@ -113,7 +114,10 @@ const updateOnlineStatus = (isOnline: boolean): void => {
 /**
  * Make API request with error handling
  */
-async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function apiRequest<T>(
+  endpoint: string,
+  options: RequestInit = {},
+): Promise<T> {
   const url = `${SYNC_CONFIG.apiBaseUrl}${endpoint}`;
 
   const response = await fetch(url, {
@@ -125,7 +129,9 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Request failed" }));
+    const error = await response
+      .json()
+      .catch(() => ({ error: "Request failed" }));
     throw new Error(error.error || `HTTP ${response.status}`);
   }
 
@@ -218,7 +224,9 @@ export const deleteRemoteExams = async (ids: string[]): Promise<boolean> => {
  */
 const addPendingAction = (action: PendingAction): void => {
   // Remove any existing action for the same exam
-  syncState.pendingActions = syncState.pendingActions.filter((a) => a.examId !== action.examId);
+  syncState.pendingActions = syncState.pendingActions.filter(
+    (a) => a.examId !== action.examId,
+  );
   syncState.pendingActions.push(action);
   saveSyncState();
 };
@@ -250,14 +258,18 @@ export const syncToRemote = async (): Promise<SyncResult> => {
         const success = await saveRemoteExam(action.data);
         if (success) {
           result.pushed++;
-          syncState.pendingActions = syncState.pendingActions.filter((a) => a.examId !== action.examId);
+          syncState.pendingActions = syncState.pendingActions.filter(
+            (a) => a.examId !== action.examId,
+          );
         } else {
           result.errors.push(`Failed to sync exam: ${action.examId}`);
         }
       } else if (action.type === "delete") {
         const success = await deleteRemoteExam(action.examId);
         if (success) {
-          syncState.pendingActions = syncState.pendingActions.filter((a) => a.examId !== action.examId);
+          syncState.pendingActions = syncState.pendingActions.filter(
+            (a) => a.examId !== action.examId,
+          );
         } else {
           result.errors.push(`Failed to delete exam: ${action.examId}`);
         }
@@ -552,7 +564,10 @@ export const deleteExamsWithSync = async (ids: string[]): Promise<void> => {
 /**
  * Update questions with sync
  */
-export const updateQuestionsWithSync = async (fileName: string, questions: ExamRecord["questions"]): Promise<void> => {
+export const updateQuestionsWithSync = async (
+  fileName: string,
+  questions: ExamRecord["questions"],
+): Promise<void> => {
   // Update locally
   await storageService.updateQuestionsForFile(fileName, questions);
 
@@ -623,7 +638,12 @@ export const updatePageDetectionsAndQuestionsWithSync = async (
   newFileQuestions: ExamRecord["questions"],
 ): Promise<void> => {
   // Update locally first
-  await storageService.updatePageDetectionsAndQuestions(fileName, pageNumber, newDetections, newFileQuestions);
+  await storageService.updatePageDetectionsAndQuestions(
+    fileName,
+    pageNumber,
+    newDetections,
+    newFileQuestions,
+  );
 
   // Get updated record for sync
   const list = await storageService.getHistoryList();

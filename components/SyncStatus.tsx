@@ -24,13 +24,19 @@ const SyncStatus: React.FC = () => {
     <div className="sync-status-container">
       {/* Status indicator */}
       <div className="sync-status-indicator">
-        <span className={`status-dot ${status.isOnline ? "online" : "offline"}`} />
+        <span
+          className={`status-dot ${status.isOnline ? "online" : "offline"}`}
+        />
         <span className="status-text">{status.isOnline ? "在线" : "离线"}</span>
-        {status.pendingCount > 0 && <span className="pending-badge">{status.pendingCount} 待同步</span>}
+        {status.pendingCount > 0 && (
+          <span className="pending-badge">{status.pendingCount} 待同步</span>
+        )}
       </div>
 
       {/* Last sync time */}
-      <div className="last-sync-time">上次同步: {formatTime(status.lastSyncTime)}</div>
+      <div className="last-sync-time">
+        上次同步: {formatTime(status.lastSyncTime)}
+      </div>
 
       {/* Error display */}
       {status.error && (
@@ -42,7 +48,11 @@ const SyncStatus: React.FC = () => {
 
       {/* Sync controls */}
       <div className="sync-controls">
-        <button className="sync-button primary" onClick={sync} disabled={status.isSyncing || !status.isOnline}>
+        <button
+          className="sync-button primary"
+          onClick={sync}
+          disabled={status.isSyncing || !status.isOnline}
+        >
           {status.isSyncing ? (
             <>
               <span className="spinner" />
@@ -77,7 +87,11 @@ const SyncStatus: React.FC = () => {
         </button>
 
         {status.pendingCount > 0 && (
-          <button className="sync-button danger" onClick={clearPending} title="清除待同步操作（谨慎使用）">
+          <button
+            className="sync-button danger"
+            onClick={clearPending}
+            title="清除待同步操作（谨慎使用）"
+          >
             <span className="icon">🗑️</span>
             清除待同步
           </button>
